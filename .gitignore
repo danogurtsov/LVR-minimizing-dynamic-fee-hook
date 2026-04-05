@@ -1,0 +1,23 @@
+# local research / planning — never published
+research/
+
+# foundry
+cache/
+out/
+broadcast/
+!broadcast/**/dry-run/
+
+# deps
+node_modules/
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# misc
+.DS_Store
+*.log
+docs/gas-snapshot.tmp
+lcov.info
+coverage/

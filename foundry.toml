@@ -1,0 +1,25 @@
+[profile.default]
+src = "src"
+out = "out"
+test = "test"
+libs = ["lib"]
+solc = "0.8.26"
+evm_version = "cancun"          # v4 requires transient storage (EIP-1153)
+optimizer = true
+optimizer_runs = 800
+ffi = false
+fs_permissions = [{ access = "read-write", path = "./docs" }]
+
+[profile.ci]
+verbosity = 3
+fuzz = { runs = 1000 }
+invariant = { runs = 256, depth = 64 }
+
+[fmt]
+line_length = 110
+tab_width = 4
+bracket_spacing = false
+int_types = "long"
+
+[rpc_endpoints]
+mainnet = "${ETH_RPC_URL}"
