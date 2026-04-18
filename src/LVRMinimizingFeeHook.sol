@@ -57,14 +57,15 @@ contract LVRMinimizingFeeHook is BaseOverrideFee, ILVRFeeHook {
         return selector;
     }
 
-    /// @dev Skeleton: static base fee. The volatility-indexed curve is wired in next.
-    function _getFee(address, PoolKey calldata, SwapParams calldata, bytes calldata)
+    /// @dev The volatility-indexed fee: `clamp(baseFee + slope * variance, minFee, maxFee)`,
+    ///      read from the current per-pool variance estimate.
+    function _getFee(address, PoolKey calldata key, SwapParams calldata, bytes calldata)
         internal
         view
         override
         returns (uint24)
     {
-        return _feeParams.baseFee;
+        return _feeParams.fee(_obs[key.toId()].current());
     }
 
     /// @dev Fold the post-swap tick into the pool's volatility estimate.
