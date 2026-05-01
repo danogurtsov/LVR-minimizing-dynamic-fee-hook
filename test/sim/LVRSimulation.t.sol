@@ -9,6 +9,9 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 
@@ -17,12 +20,18 @@ import {FeeCurve} from "../../src/libraries/FeeCurve.sol";
 import {RealizedVolatility} from "../../src/libraries/RealizedVolatility.sol";
 import {PricePath} from "./harness/PricePath.sol";
 import {ArbitrageAgent} from "./harness/ArbitrageAgent.sol";
+import {RetailFlow} from "./harness/RetailFlow.sol";
+import {StatsCollector} from "./harness/StatsCollector.sol";
 
 /// @notice Drives a seeded external price path against a live pool, arbitraging every block, to
 ///         exercise the LVR loop end-to-end. The static-vs-dynamic comparison builds on this.
 contract LVRSimulationTest is Test, Deployers {
+    using PoolIdLibrary for PoolKey;
+    using StateLibrary for IPoolManager;
+
     LVRMinimizingFeeHook internal hook;
     ArbitrageAgent internal arb;
+    RetailFlow internal retail;
 
     FeeCurve.Params internal feeParams = FeeCurve.Params({baseFee: 500, minFee: 100, maxFee: 10_000, slope: 5e7});
     RealizedVolatility.Config internal volCfg =
@@ -43,6 +52,10 @@ contract LVRSimulationTest is Test, Deployers {
         arb = new ArbitrageAgent(swapRouter, manager, key, t0, t1);
         MockERC20(t0).transfer(address(arb), 1e30);
         MockERC20(t1).transfer(address(arb), 1e30);
+
+        retail = new RetailFlow(swapRouter, key, t0, t1);
+        MockERC20(t0).transfer(address(retail), 1e28);
+        MockERC20(t1).transfer(address(retail), 1e28);
     }
 
     function _deployHook(FeeCurve.Params memory fp) internal {
@@ -78,5 +91,16 @@ contract LVRSimulationTest is Test, Deployers {
 
         assertGt(hook.currentVariance(key), 0);
         assertGt(hook.currentFee(key), feeParams.baseFee);
+    }
+
+    function test_retailFlow_accruesLpFees() public {
+        for (uint256 b = 1; b <= 30; b++) {
+            vm.roll(block.number + 1);
+            arb.arbToTick(_clamp(PricePath.tickAt(42, b, START_TICK, 120)));
+            retail.noiseSwap(b);
+        }
+        uint128 liq = manager.getLiquidity(key.toId());
+        uint256 lpFees = StatsCollector.lpFeeValue(manager, key.toId(), liq, 1e18);
+        assertGt(lpFees, 0);
     }
 }
