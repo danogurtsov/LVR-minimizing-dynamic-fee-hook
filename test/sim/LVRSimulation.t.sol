@@ -103,4 +103,75 @@ contract LVRSimulationTest is Test, Deployers {
         uint256 lpFees = StatsCollector.lpFeeValue(manager, key.toId(), liq, 1e18);
         assertGt(lpFees, 0);
     }
+
+    // --- static vs dynamic ----------------------------------------------------
+
+    uint256 internal constant SEED = 42;
+    uint24 internal constant STEP = 120;
+    uint256 internal constant NBLOCKS = 60;
+
+    struct RunResult {
+        uint256 lpFeeValue; // LP fee revenue, valued at P=1
+        int256 arbInventory; // arb net inventory value at P=1 (more negative => arb kept less)
+        uint256 avgRetailFeePips; // mean fee retail was charged
+    }
+
+    /// @notice Run the identical price path + retail flow against either a fixed-fee pool (no hook)
+    ///         or the dynamic-fee pool, and return LP fee revenue, the arbitrageur's net inventory,
+    ///         and the average fee retail paid.
+    function _run(bool dynamic) internal returns (RunResult memory res) {
+        deployFreshManagerAndRouters();
+        deployMintAndApprove2Currencies();
+
+        PoolKey memory k;
+        if (dynamic) {
+            _deployHook(feeParams);
+            (k,) = initPool(currency0, currency1, IHooks(address(hook)), LPFeeLibrary.DYNAMIC_FEE_FLAG, 60, SQRT_PRICE_1_1);
+        } else {
+            (k,) = initPool(currency0, currency1, IHooks(address(0)), feeParams.baseFee, 60, SQRT_PRICE_1_1);
+        }
+        modifyLiquidityRouter.modifyLiquidity(
+            k, ModifyLiquidityParams({tickLower: -6000, tickUpper: 6000, liquidityDelta: 1e21, salt: 0}), ZERO_BYTES
+        );
+
+        address t0 = Currency.unwrap(currency0);
+        address t1 = Currency.unwrap(currency1);
+        ArbitrageAgent a = new ArbitrageAgent(swapRouter, manager, k, t0, t1);
+        MockERC20(t0).transfer(address(a), 1e30);
+        MockERC20(t1).transfer(address(a), 1e30);
+        RetailFlow r = new RetailFlow(swapRouter, k, t0, t1);
+        MockERC20(t0).transfer(address(r), 1e28);
+        MockERC20(t1).transfer(address(r), 1e28);
+
+        uint256 feeSum;
+        for (uint256 b = 1; b <= NBLOCKS; b++) {
+            vm.roll(block.number + 1);
+            a.arbToTick(_clamp(PricePath.tickAt(SEED, b, START_TICK, STEP)));
+            feeSum += dynamic ? hook.currentFee(k) : feeParams.baseFee; // fee retail faces this block
+            r.noiseSwap(b);
+        }
+
+        res.arbInventory = a.inventoryValue(1e18, 1e30, 1e30);
+        uint128 liq = manager.getLiquidity(k.toId());
+        res.lpFeeValue = StatsCollector.lpFeeValue(manager, k.toId(), liq, 1e18);
+        res.avgRetailFeePips = feeSum / NBLOCKS;
+    }
+
+    function test_dynamicFee_liftsLpRevenue() public {
+        RunResult memory s = _run(false);
+        RunResult memory d = _run(true);
+
+        emit log_named_uint("LP fees        (static) ", s.lpFeeValue);
+        emit log_named_uint("LP fees        (dynamic)", d.lpFeeValue);
+        emit log_named_int("arb inventory  (static) ", s.arbInventory);
+        emit log_named_int("arb inventory  (dynamic)", d.arbInventory);
+        emit log_named_uint("avg retail fee (static) ", s.avgRetailFeePips);
+        emit log_named_uint("avg retail fee (dynamic)", d.avgRetailFeePips);
+
+        // On a volatile path the dynamic fee lifts LP fee revenue and leaves the arbitrageur with
+        // less, at the cost of a higher average fee to retail — the tradeoff, measured, not asserted.
+        assertGt(d.lpFeeValue, s.lpFeeValue);
+        assertLt(d.arbInventory, s.arbInventory);
+        assertGe(d.avgRetailFeePips, s.avgRetailFeePips);
+    }
 }
