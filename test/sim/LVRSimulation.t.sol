@@ -23,12 +23,13 @@ import {ArbitrageAgent} from "./harness/ArbitrageAgent.sol";
 import {RetailFlow} from "./harness/RetailFlow.sol";
 import {StatsCollector} from "./harness/StatsCollector.sol";
 
-/// @notice Drives a seeded external price path against a live pool, arbitraging every block, to
-///         exercise the LVR loop end-to-end. The static-vs-dynamic comparison builds on this.
-contract LVRSimulationTest is Test, Deployers {
-    using PoolIdLibrary for PoolKey;
-    using StateLibrary for IPoolManager;
+using PoolIdLibrary for PoolKey;
+using StateLibrary for IPoolManager;
 
+/// @notice Shared LVR-simulation harness: builds pools + agents, runs a seeded price path, and
+///         measures the static-vs-dynamic outcome. Carries no tests of its own so it can back both
+///         the offline suite and the fork suite.
+abstract contract LVRSimBase is Test, Deployers {
     LVRMinimizingFeeHook internal hook;
     ArbitrageAgent internal arb;
     RetailFlow internal retail;
@@ -39,20 +40,29 @@ contract LVRSimulationTest is Test, Deployers {
 
     int24 internal constant START_TICK = 0;
     int24 internal constant RANGE = 3000;
+    uint256 internal constant SEED = 42;
+    uint256 internal constant NBLOCKS = 60;
+    uint24 internal stepTicks = 120; // per-block volatility of the external path; overridable
 
-    function setUp() public {
+    struct RunResult {
+        uint256 lpFeeValue; // LP fee revenue, valued at P=1
+        int256 arbInventory; // arb net inventory value at P=1 (more negative => arb kept less)
+        uint256 avgRetailFeePips; // mean fee retail was charged
+    }
+
+    /// @dev Build a local dynamic-fee pool with agents (used by the instance tests).
+    function _setupLocalWorld() internal {
         deployFreshManagerAndRouters();
         deployMintAndApprove2Currencies();
         _deployHook(feeParams);
         (key,) = initPool(currency0, currency1, IHooks(address(hook)), LPFeeLibrary.DYNAMIC_FEE_FLAG, SQRT_PRICE_1_1);
-        _addWideLiquidity();
+        _addWideLiquidity(key);
 
         address t0 = Currency.unwrap(currency0);
         address t1 = Currency.unwrap(currency1);
         arb = new ArbitrageAgent(swapRouter, manager, key, t0, t1);
         MockERC20(t0).transfer(address(arb), 1e30);
         MockERC20(t1).transfer(address(arb), 1e30);
-
         retail = new RetailFlow(swapRouter, key, t0, t1);
         MockERC20(t0).transfer(address(retail), 1e28);
         MockERC20(t1).transfer(address(retail), 1e28);
@@ -67,9 +77,9 @@ contract LVRSimulationTest is Test, Deployers {
         assertEq(address(hook), expected);
     }
 
-    function _addWideLiquidity() internal {
+    function _addWideLiquidity(PoolKey memory k) internal {
         modifyLiquidityRouter.modifyLiquidity(
-            key, ModifyLiquidityParams({tickLower: -6000, tickUpper: 6000, liquidityDelta: 1e21, salt: 0}), ZERO_BYTES
+            k, ModifyLiquidityParams({tickLower: -6000, tickUpper: 6000, liquidityDelta: 1e21, salt: 0}), ZERO_BYTES
         );
     }
 
@@ -77,43 +87,6 @@ contract LVRSimulationTest is Test, Deployers {
         if (t > RANGE) return RANGE;
         if (t < -RANGE) return -RANGE;
         return t;
-    }
-
-    function test_volatilePath_buildsVarianceAndRaisesFee() public {
-        uint256 seed = 42;
-        uint24 stepTicks = 120;
-        uint256 nBlocks = 40;
-
-        for (uint256 b = 1; b <= nBlocks; b++) {
-            vm.roll(block.number + 1);
-            arb.arbToTick(_clamp(PricePath.tickAt(seed, b, START_TICK, stepTicks)));
-        }
-
-        assertGt(hook.currentVariance(key), 0);
-        assertGt(hook.currentFee(key), feeParams.baseFee);
-    }
-
-    function test_retailFlow_accruesLpFees() public {
-        for (uint256 b = 1; b <= 30; b++) {
-            vm.roll(block.number + 1);
-            arb.arbToTick(_clamp(PricePath.tickAt(42, b, START_TICK, 120)));
-            retail.noiseSwap(b);
-        }
-        uint128 liq = manager.getLiquidity(key.toId());
-        uint256 lpFees = StatsCollector.lpFeeValue(manager, key.toId(), liq, 1e18);
-        assertGt(lpFees, 0);
-    }
-
-    // --- static vs dynamic ----------------------------------------------------
-
-    uint256 internal constant SEED = 42;
-    uint24 internal constant STEP = 120;
-    uint256 internal constant NBLOCKS = 60;
-
-    struct RunResult {
-        uint256 lpFeeValue; // LP fee revenue, valued at P=1
-        int256 arbInventory; // arb net inventory value at P=1 (more negative => arb kept less)
-        uint256 avgRetailFeePips; // mean fee retail was charged
     }
 
     /// @notice Run the identical price path + retail flow against either a fixed-fee pool (no hook)
@@ -130,9 +103,7 @@ contract LVRSimulationTest is Test, Deployers {
         } else {
             (k,) = initPool(currency0, currency1, IHooks(address(0)), feeParams.baseFee, 60, SQRT_PRICE_1_1);
         }
-        modifyLiquidityRouter.modifyLiquidity(
-            k, ModifyLiquidityParams({tickLower: -6000, tickUpper: 6000, liquidityDelta: 1e21, salt: 0}), ZERO_BYTES
-        );
+        _addWideLiquidity(k);
 
         address t0 = Currency.unwrap(currency0);
         address t1 = Currency.unwrap(currency1);
@@ -146,7 +117,7 @@ contract LVRSimulationTest is Test, Deployers {
         uint256 feeSum;
         for (uint256 b = 1; b <= NBLOCKS; b++) {
             vm.roll(block.number + 1);
-            a.arbToTick(_clamp(PricePath.tickAt(SEED, b, START_TICK, STEP)));
+            a.arbToTick(_clamp(PricePath.tickAt(SEED, b, START_TICK, stepTicks)));
             feeSum += dynamic ? hook.currentFee(k) : feeParams.baseFee; // fee retail faces this block
             r.noiseSwap(b);
         }
@@ -155,6 +126,32 @@ contract LVRSimulationTest is Test, Deployers {
         uint128 liq = manager.getLiquidity(k.toId());
         res.lpFeeValue = StatsCollector.lpFeeValue(manager, k.toId(), liq, 1e18);
         res.avgRetailFeePips = feeSum / NBLOCKS;
+    }
+}
+
+/// @notice Offline simulation suite: exercises the LVR loop and the static-vs-dynamic comparison.
+contract LVRSimulationTest is LVRSimBase {
+    function setUp() public {
+        _setupLocalWorld();
+    }
+
+    function test_volatilePath_buildsVarianceAndRaisesFee() public {
+        for (uint256 b = 1; b <= 40; b++) {
+            vm.roll(block.number + 1);
+            arb.arbToTick(_clamp(PricePath.tickAt(SEED, b, START_TICK, stepTicks)));
+        }
+        assertGt(hook.currentVariance(key), 0);
+        assertGt(hook.currentFee(key), feeParams.baseFee);
+    }
+
+    function test_retailFlow_accruesLpFees() public {
+        for (uint256 b = 1; b <= 30; b++) {
+            vm.roll(block.number + 1);
+            arb.arbToTick(_clamp(PricePath.tickAt(SEED, b, START_TICK, stepTicks)));
+            retail.noiseSwap(b);
+        }
+        uint128 liq = manager.getLiquidity(key.toId());
+        assertGt(StatsCollector.lpFeeValue(manager, key.toId(), liq, 1e18), 0);
     }
 
     function test_dynamicFee_liftsLpRevenue() public {
