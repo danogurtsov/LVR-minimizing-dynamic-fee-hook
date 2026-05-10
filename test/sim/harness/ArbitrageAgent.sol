@@ -46,7 +46,8 @@ contract ArbitrageAgent {
             SwapParams({zeroForOne: zeroForOne, amountSpecified: -int256(1e27), sqrtPriceLimitX96: target}),
             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
-        ) {} catch {}
+        ) {}
+            catch {}
     }
 
     /// @notice Net inventory value at external price P (token1 per token0, WAD): Δ1 + Δ0 * P.

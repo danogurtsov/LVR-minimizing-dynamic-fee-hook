@@ -38,7 +38,8 @@ contract SwapHandler is Test {
             SwapParams({zeroForOne: zeroForOne, amountSpecified: -int256(amount), sqrtPriceLimitX96: limit}),
             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
-        ) {} catch {}
+        ) {}
+            catch {}
     }
 
     function advance(uint8 n) external {
@@ -50,7 +51,8 @@ contract FeeBoundsInvariant is Test, Deployers {
     LVRMinimizingFeeHook internal hook;
     SwapHandler internal handler;
 
-    FeeCurve.Params internal feeParams = FeeCurve.Params({baseFee: 500, minFee: 100, maxFee: 10_000, slope: 5e7});
+    FeeCurve.Params internal feeParams =
+        FeeCurve.Params({baseFee: 500, minFee: 100, maxFee: 10_000, slope: 5e7});
     RealizedVolatility.Config internal volCfg =
         RealizedVolatility.Config({maxAbsTickMove: 1000, alphaWad: 0.2e18});
 

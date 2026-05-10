@@ -34,7 +34,8 @@ abstract contract LVRSimBase is Test, Deployers {
     ArbitrageAgent internal arb;
     RetailFlow internal retail;
 
-    FeeCurve.Params internal feeParams = FeeCurve.Params({baseFee: 500, minFee: 100, maxFee: 10_000, slope: 5e7});
+    FeeCurve.Params internal feeParams =
+        FeeCurve.Params({baseFee: 500, minFee: 100, maxFee: 10_000, slope: 5e7});
     RealizedVolatility.Config internal volCfg =
         RealizedVolatility.Config({maxAbsTickMove: 1000, alphaWad: 0.2e18});
 
@@ -55,7 +56,9 @@ abstract contract LVRSimBase is Test, Deployers {
         deployFreshManagerAndRouters();
         deployMintAndApprove2Currencies();
         _deployHook(feeParams);
-        (key,) = initPool(currency0, currency1, IHooks(address(hook)), LPFeeLibrary.DYNAMIC_FEE_FLAG, SQRT_PRICE_1_1);
+        (key,) = initPool(
+            currency0, currency1, IHooks(address(hook)), LPFeeLibrary.DYNAMIC_FEE_FLAG, SQRT_PRICE_1_1
+        );
         _addWideLiquidity(key);
 
         address t0 = Currency.unwrap(currency0);
@@ -79,7 +82,9 @@ abstract contract LVRSimBase is Test, Deployers {
 
     function _addWideLiquidity(PoolKey memory k) internal {
         modifyLiquidityRouter.modifyLiquidity(
-            k, ModifyLiquidityParams({tickLower: -6000, tickUpper: 6000, liquidityDelta: 1e21, salt: 0}), ZERO_BYTES
+            k,
+            ModifyLiquidityParams({tickLower: -6000, tickUpper: 6000, liquidityDelta: 1e21, salt: 0}),
+            ZERO_BYTES
         );
     }
 
@@ -99,7 +104,9 @@ abstract contract LVRSimBase is Test, Deployers {
         PoolKey memory k;
         if (dynamic) {
             _deployHook(feeParams);
-            (k,) = initPool(currency0, currency1, IHooks(address(hook)), LPFeeLibrary.DYNAMIC_FEE_FLAG, 60, SQRT_PRICE_1_1);
+            (k,) = initPool(
+                currency0, currency1, IHooks(address(hook)), LPFeeLibrary.DYNAMIC_FEE_FLAG, 60, SQRT_PRICE_1_1
+            );
         } else {
             (k,) = initPool(currency0, currency1, IHooks(address(0)), feeParams.baseFee, 60, SQRT_PRICE_1_1);
         }

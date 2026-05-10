@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: fmt · build · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Format check
+        run: forge fmt --check
+
+      - name: Build
+        run: forge build --sizes
+
+      - name: Test
+        run: forge test -vv
+        # Unit, invariant and simulation tests run here. The fork suite skips automatically
+        # because ETH_RPC_URL is unset.

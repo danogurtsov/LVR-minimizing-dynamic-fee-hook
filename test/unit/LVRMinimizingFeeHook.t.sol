@@ -18,7 +18,8 @@ contract LVRMinimizingFeeHookTest is Test, Deployers {
     LVRMinimizingFeeHook internal hook;
     address internal owner = address(0xB0B);
 
-    FeeCurve.Params internal feeParams = FeeCurve.Params({baseFee: 500, minFee: 100, maxFee: 10_000, slope: 5e7});
+    FeeCurve.Params internal feeParams =
+        FeeCurve.Params({baseFee: 500, minFee: 100, maxFee: 10_000, slope: 5e7});
     RealizedVolatility.Config internal volCfg =
         RealizedVolatility.Config({maxAbsTickMove: 1000, alphaWad: 0.2e18});
 

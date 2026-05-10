@@ -33,6 +33,7 @@ contract RetailFlow {
             SwapParams({zeroForOne: zeroForOne, amountSpecified: -int256(amount), sqrtPriceLimitX96: limit}),
             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
-        ) {} catch {}
+        ) {}
+            catch {}
     }
 }
