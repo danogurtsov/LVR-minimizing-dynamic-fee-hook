@@ -89,19 +89,44 @@ reverts otherwise — and every callback is `onlyPoolManager`.
 
 The claim "a volatility-indexed fee improves LP outcomes" is quantitative, so the centerpiece is a
 **simulation harness** that reports, static-fee vs dynamic-fee, over an identical seeded path: LP fee
-revenue, the value the arbitrageur keeps, and the average fee retail pays. Headline, over a volatile
-path and seeded by live mainnet pools:
+revenue, the value the arbitrageur keeps, and the average fee retail pays. Sweeping the external
+path's volatility (`test/sim`, seed 42, 60 blocks) draws the whole tradeoff:
 
-| Pool / regime | LP fees static → dynamic | Change | Avg retail fee (dyn) |
+```mermaid
+xychart-beta
+    title "LP fee revenue lift — dynamic vs static fee"
+    x-axis "volatility (ticks / block)" [20, 60, 120, 200, 300]
+    y-axis "lift (x)" 0 --> 20
+    bar [1.1, 2.0, 4.8, 13.1, 18.9]
+```
+
+```mermaid
+xychart-beta
+    title "Average fee retail pays (%) — static (flat) vs dynamic (bars)"
+    x-axis "volatility (ticks / block)" [20, 60, 120, 200, 300]
+    y-axis "fee (%)" 0 --> 1
+    line [0.05, 0.05, 0.05, 0.05, 0.05]
+    bar [0.057, 0.10, 0.25, 0.67, 0.97]
+```
+
+| Volatility | LP fees static → dynamic | LP lift | Avg retail fee (dyn) |
 |---|---|---:|---:|
-| WBTC/ETH — volatile | 0.153 → 1.999 | **+13.1×** | 0.673% |
-| ETH/USDC — mid | 0.086 → 0.412 | +4.8× | 0.249% |
-| USDC/USDT — stable | 0.0149 → 0.0167 | +1.1× | 0.057% |
+| stable (20) | 0.0149 → 0.0167 | **1.1×** | 0.057% |
+| low (60) | 0.0409 → 0.0809 | 2.0× | 0.100% |
+| mid (120) | 0.0861 → 0.4116 | 4.8× | 0.249% |
+| high (200) | 0.1526 → 1.9986 | **13.1×** | 0.673% |
+| extreme (300) | 0.2152 → 4.0588 | 18.9× | 0.970% |
 
-It helps most in volatile, arbitrage-heavy pools and is **near-neutral in stable ones** (retail there
-still pays ~the base fee) — the fee does no harm where there is little LVR to recapture, and the
-higher-fee cost in volatile regimes is shown, not hidden. Full tables and method:
-[`docs/RESULTS.md`](docs/RESULTS.md).
+**Tradeoffs, in one breath:**
+- **Volatile pools win big** — the fee tracks the σ² shape of LVR, so LP fee revenue rises 5–19× where
+  arbitrage is heaviest, and the arbitrageur is left with less.
+- **Stable pools are left alone** — low realized volatility keeps the fee at the floor, so retail pays
+  ~the base fee (0.057% ≈ 0.05%) and LP revenue barely moves. No harm where there is no LVR to recapture.
+- **The cost is retail fee** — in volatile regimes the average fee retail pays climbs toward ~1%. That
+  tradeoff is measured per regime, not hidden; whether the extra LP revenue is worth it is a per-pool call.
+
+The fork suite reproduces this seeded by **live mainnet pools** (WBTC/ETH, ETH/USDC, USDC/USDT). Full
+tables, method and caveats: [`docs/RESULTS.md`](docs/RESULTS.md).
 
 ## Running the tests
 

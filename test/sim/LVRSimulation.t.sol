@@ -178,4 +178,19 @@ contract LVRSimulationTest is LVRSimBase {
         assertLt(d.arbInventory, s.arbInventory);
         assertGe(d.avgRetailFeePips, s.avgRetailFeePips);
     }
+
+    /// @notice Sweep across volatility regimes; the logged figures feed the README charts.
+    function test_scenarioSweep() public {
+        uint24[5] memory steps = [uint24(20), 60, 120, 200, 300];
+        for (uint256 i; i < steps.length; i++) {
+            stepTicks = steps[i];
+            RunResult memory s = _run(false);
+            RunResult memory d = _run(true);
+            emit log_named_uint("step           ", steps[i]);
+            emit log_named_uint("  LP static    ", s.lpFeeValue);
+            emit log_named_uint("  LP dynamic   ", d.lpFeeValue);
+            emit log_named_uint("  retail static ", s.avgRetailFeePips);
+            emit log_named_uint("  retail dynamic", d.avgRetailFeePips);
+        }
+    }
 }
