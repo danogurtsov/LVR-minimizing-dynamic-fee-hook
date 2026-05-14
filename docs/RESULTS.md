@@ -8,6 +8,27 @@ token units, valued at a 1:1 price; treat them as ratios, not absolute LVR figur
 Fixed curve for every run: `baseFee 0.05% · floor 0.01% · cap 1.00% · slope 5e7`, EWMA `alpha 0.2`,
 per-block tick clamp `1000`. Path: 60 blocks, seed 42.
 
+## Offline — fee-aggressiveness sweep (`test_feeAggressivenessSweep`)
+
+Volatility fixed; the fee curve's `slope` is cranked. Retail is fee-elastic (demand falls linearly
+to zero at 1.05%). LP fee revenue is split into the part paid by arbitrageurs and the part paid by
+retail. Values are token units at P=1.
+
+| Avg fee | Arb fees (LVR recapture) | Retail fees | Retail volume |
+|---:|---:|---:|---:|
+| 0.05% | 0.100 | 0.0138 | 27.5 |
+| 0.21% | 0.399 | 0.0467 | 23.3 |
+| 0.36% | 0.700 | **0.0648** ← peak | 19.0 |
+| 0.67% | 1.303 | 0.0568 | 10.6 |
+| 0.93% | 1.822 | 0.0237 | 3.4 |
+| 0.98% | 1.943 | 0.0170 | 2.0 |
+
+Arbitrage recapture rises monotonically with the fee, but retail fee revenue is a **Laffer curve** —
+it peaks near ~0.35% and then falls as the fee drives volume away (retail volume collapses ~93% across
+the sweep). The optimum fee balances the two; the maximum fee is *not* optimal. This is asserted, not
+just plotted: the test requires the arb series to be monotone and the retail series to peak in the
+interior.
+
 ## Offline — volatility sweep (`test_scenarioSweep`)
 
 The external path's per-block volatility (in ticks) is swept; everything else is fixed. Each row is a

@@ -88,45 +88,58 @@ reverts otherwise — and every callback is `onlyPoolManager`.
 ## Results
 
 The claim "a volatility-indexed fee improves LP outcomes" is quantitative, so the centerpiece is a
-**simulation harness** that reports, static-fee vs dynamic-fee, over an identical seeded path: LP fee
-revenue, the value the arbitrageur keeps, and the average fee retail pays. Sweeping the external
-path's volatility (`test/sim`, seed 42, 60 blocks) draws the whole tradeoff:
+**simulation harness** that measures **both sides** of the fee. Retail in the sim is **fee-elastic** —
+it trades less as the fee rises — which is what turns the fee into a genuine tradeoff rather than free
+money.
+
+### The tradeoff: there is an optimal fee, not "max fee"
+
+Fix the volatility and crank the fee's aggressiveness. LP revenue splits into two opposing forces
+(`test/sim/test_feeAggressivenessSweep`, x-axis = the average fee it produces):
 
 ```mermaid
 xychart-beta
-    title "LP fee revenue lift — dynamic vs static fee"
-    x-axis "volatility (ticks / block)" [20, 60, 120, 200, 300]
-    y-axis "lift (x)" 0 --> 20
-    bar [1.1, 2.0, 4.8, 13.1, 18.9]
+    title "Two opposing forces (each indexed to its own max)"
+    x-axis "average fee (%)" [0.05, 0.21, 0.36, 0.67, 0.93, 0.98]
+    y-axis "share of own max (%)" 0 --> 100
+    line [5, 21, 36, 67, 94, 100]
+    line [21, 72, 100, 88, 37, 26]
 ```
 
 ```mermaid
 xychart-beta
-    title "Average fee retail pays (%) — static (flat) vs dynamic (bars)"
-    x-axis "volatility (ticks / block)" [20, 60, 120, 200, 300]
-    y-axis "fee (%)" 0 --> 1
-    line [0.05, 0.05, 0.05, 0.05, 0.05]
-    bar [0.057, 0.10, 0.25, 0.67, 0.97]
+    title "The cost: retail volume you spend to get there"
+    x-axis "average fee (%)" [0.05, 0.21, 0.36, 0.67, 0.93, 0.98]
+    y-axis "retail volume (base fee = 100)" 0 --> 100
+    bar [100, 85, 69, 38, 12, 7]
 ```
 
-| Volatility | LP fees static → dynamic | LP lift | Avg retail fee (dyn) |
+- **Rising line — recapture from arbitrageurs.** A wider fee keeps more of the LVR in the pool; this
+  grows monotonically with the fee.
+- **Humped line — fee revenue from retail.** This is a **Laffer curve**: it peaks near **~0.35%** and
+  then *falls*, because past that point the fee scares off retail volume faster than the higher rate
+  makes up for it. The bar chart is that lost volume — down ~93% by the time the fee hits the cap.
+
+So the fee has a **sweet spot** (here ≈ 0.3–0.5%): aggressive enough to claw back arbitrage LVR, not so
+aggressive it kills the retail franchise. Turning the fee to the max is the wrong move — the volatility
+index is only useful if it's *tuned*, and the harness is what sizes it. (The `slope`/`maxFee`
+parameters are exactly this dial.)
+
+### Where it pays off: volatile pools, not stable ones
+
+Sweeping the pool's volatility instead of the fee (matched static-vs-dynamic, seeded by **live mainnet
+pools** in the fork suite):
+
+| Pool / regime | LP fees static → dynamic | LP lift | Avg retail fee (dyn) |
 |---|---|---:|---:|
-| stable (20) | 0.0149 → 0.0167 | **1.1×** | 0.057% |
-| low (60) | 0.0409 → 0.0809 | 2.0× | 0.100% |
-| mid (120) | 0.0861 → 0.4116 | 4.8× | 0.249% |
-| high (200) | 0.1526 → 1.9986 | **13.1×** | 0.673% |
-| extreme (300) | 0.2152 → 4.0588 | 18.9× | 0.970% |
+| USDC/USDT — stable | 0.0149 → 0.0167 | **1.1×** | 0.057% |
+| ETH/USDC — mid | 0.0861 → 0.4116 | 4.8× | 0.249% |
+| WBTC/ETH — volatile | 0.1526 → 1.9986 | **13.1×** | 0.673% |
 
-**Tradeoffs, in one breath:**
-- **Volatile pools win big** — the fee tracks the σ² shape of LVR, so LP fee revenue rises 5–19× where
-  arbitrage is heaviest, and the arbitrageur is left with less.
-- **Stable pools are left alone** — low realized volatility keeps the fee at the floor, so retail pays
-  ~the base fee (0.057% ≈ 0.05%) and LP revenue barely moves. No harm where there is no LVR to recapture.
-- **The cost is retail fee** — in volatile regimes the average fee retail pays climbs toward ~1%. That
-  tradeoff is measured per regime, not hidden; whether the extra LP revenue is worth it is a per-pool call.
-
-The fork suite reproduces this seeded by **live mainnet pools** (WBTC/ETH, ETH/USDC, USDC/USDT). Full
-tables, method and caveats: [`docs/RESULTS.md`](docs/RESULTS.md).
+The hook earns its keep in volatile, arbitrage-heavy pools and is **near-neutral in stable ones** —
+low volatility pins the fee at the floor, so retail there still pays ~the base fee. No benefit and no
+harm where there is no LVR to recapture. Full tables, method and caveats:
+[`docs/RESULTS.md`](docs/RESULTS.md).
 
 ## Running the tests
 

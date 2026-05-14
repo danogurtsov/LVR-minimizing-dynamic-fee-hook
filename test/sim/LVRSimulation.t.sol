@@ -44,11 +44,15 @@ abstract contract LVRSimBase is Test, Deployers {
     uint256 internal constant SEED = 42;
     uint256 internal constant NBLOCKS = 60;
     uint24 internal stepTicks = 120; // per-block volatility of the external path; overridable
+    uint256 internal feeSlope = 5e7; // fee aggressiveness (curve slope); overridable
+    uint256 internal constant RETAIL_PER_BLOCK = 8; // retail-heavy flow, so volume drives LP fees
 
     struct RunResult {
         uint256 lpFeeValue; // LP fee revenue, valued at P=1
         int256 arbInventory; // arb net inventory value at P=1 (more negative => arb kept less)
         uint256 avgRetailFeePips; // mean fee retail was charged
+        uint256 retailVolume; // total retail demand actually placed (falls as the fee deters it)
+        uint256 retailFees; // fee revenue from retail (Laffer: peaks then falls with aggressiveness)
     }
 
     /// @dev Build a local dynamic-fee pool with agents (used by the instance tests).
@@ -101,14 +105,17 @@ abstract contract LVRSimBase is Test, Deployers {
         deployFreshManagerAndRouters();
         deployMintAndApprove2Currencies();
 
+        FeeCurve.Params memory fp = feeParams;
+        fp.slope = feeSlope;
+
         PoolKey memory k;
         if (dynamic) {
-            _deployHook(feeParams);
+            _deployHook(fp);
             (k,) = initPool(
                 currency0, currency1, IHooks(address(hook)), LPFeeLibrary.DYNAMIC_FEE_FLAG, 60, SQRT_PRICE_1_1
             );
         } else {
-            (k,) = initPool(currency0, currency1, IHooks(address(0)), feeParams.baseFee, 60, SQRT_PRICE_1_1);
+            (k,) = initPool(currency0, currency1, IHooks(address(0)), fp.baseFee, 60, SQRT_PRICE_1_1);
         }
         _addWideLiquidity(k);
 
@@ -118,21 +125,26 @@ abstract contract LVRSimBase is Test, Deployers {
         MockERC20(t0).transfer(address(a), 1e30);
         MockERC20(t1).transfer(address(a), 1e30);
         RetailFlow r = new RetailFlow(swapRouter, k, t0, t1);
-        MockERC20(t0).transfer(address(r), 1e28);
-        MockERC20(t1).transfer(address(r), 1e28);
+        MockERC20(t0).transfer(address(r), 1e30);
+        MockERC20(t1).transfer(address(r), 1e30);
 
         uint256 feeSum;
         for (uint256 b = 1; b <= NBLOCKS; b++) {
             vm.roll(block.number + 1);
             a.arbToTick(_clamp(PricePath.tickAt(SEED, b, START_TICK, stepTicks)));
-            feeSum += dynamic ? hook.currentFee(k) : feeParams.baseFee; // fee retail faces this block
-            r.noiseSwap(b);
+            uint24 rf = dynamic ? hook.currentFee(k) : fp.baseFee; // fee retail faces this block
+            feeSum += rf;
+            for (uint256 j; j < RETAIL_PER_BLOCK; j++) {
+                r.noiseSwap(b * 10 + j, rf); // retail size shrinks with rf (fee-elastic)
+            }
         }
 
         res.arbInventory = a.inventoryValue(1e18, 1e30, 1e30);
         uint128 liq = manager.getLiquidity(k.toId());
         res.lpFeeValue = StatsCollector.lpFeeValue(manager, k.toId(), liq, 1e18);
         res.avgRetailFeePips = feeSum / NBLOCKS;
+        res.retailVolume = r.totalVolume();
+        res.retailFees = r.totalFeesPaid();
     }
 }
 
@@ -155,7 +167,7 @@ contract LVRSimulationTest is LVRSimBase {
         for (uint256 b = 1; b <= 30; b++) {
             vm.roll(block.number + 1);
             arb.arbToTick(_clamp(PricePath.tickAt(SEED, b, START_TICK, stepTicks)));
-            retail.noiseSwap(b);
+            retail.noiseSwap(b, hook.currentFee(key));
         }
         uint128 liq = manager.getLiquidity(key.toId());
         assertGt(StatsCollector.lpFeeValue(manager, key.toId(), liq, 1e18), 0);
@@ -177,6 +189,37 @@ contract LVRSimulationTest is LVRSimBase {
         assertGt(d.lpFeeValue, s.lpFeeValue);
         assertLt(d.arbInventory, s.arbInventory);
         assertGe(d.avgRetailFeePips, s.avgRetailFeePips);
+    }
+
+    /// @notice The tradeoff. Fix the volatility, crank the fee aggressiveness (curve slope), and
+    ///         watch LP fee revenue rise then FALL: past an optimum, the fee scares off the retail
+    ///         volume that generates fees faster than the higher rate makes up for it (a Laffer
+    ///         curve). Retail volume falls monotonically the whole way — that is the cost.
+    function test_feeAggressivenessSweep() public {
+        stepTicks = 150; // fixed volatility regime
+        uint256[6] memory slopes = [uint256(0), 2.5e7, 5e7, 1e8, 2e8, 4e8];
+        uint256[6] memory arb;
+        uint256[6] memory retail_;
+        for (uint256 i; i < slopes.length; i++) {
+            feeSlope = slopes[i];
+            RunResult memory d = _run(true);
+            arb[i] = d.lpFeeValue > d.retailFees ? d.lpFeeValue - d.retailFees : 0;
+            retail_[i] = d.retailFees;
+            emit log_named_uint("avg fee (pips)  ", d.avgRetailFeePips);
+            emit log_named_uint("  arb fees (LVR) ", arb[i]);
+            emit log_named_uint("  retail fees    ", retail_[i]);
+            emit log_named_uint("  total LP fees  ", d.lpFeeValue);
+            emit log_named_uint("  retail volume  ", d.retailVolume);
+        }
+
+        // recapture from arbitrageurs rises monotonically with the fee
+        for (uint256 i = 1; i < slopes.length; i++) {
+            assertGt(arb[i], arb[i - 1], "arb recapture should rise with the fee");
+        }
+        // retail fee revenue is a Laffer curve: it peaks at a moderate fee and then falls as the
+        // fee scares off the volume that generates it
+        assertGt(retail_[2], retail_[0], "retail fees should rise into the peak");
+        assertGt(retail_[2], retail_[5], "retail fees should fall past the peak");
     }
 
     /// @notice Sweep across volatility regimes; the logged figures feed the README charts.
