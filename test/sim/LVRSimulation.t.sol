@@ -9,9 +9,12 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 
@@ -53,6 +56,38 @@ abstract contract LVRSimBase is Test, Deployers {
         uint256 avgRetailFeePips; // mean fee retail was charged
         uint256 retailVolume; // total retail demand actually placed (falls as the fee deters it)
         uint256 retailFees; // fee revenue from retail (Laffer: peaks then falls with aggressiveness)
+        int256 arbProfitTrue; // arb profit valued at trade-time external price = LVR extracted from LPs
+        int256 lpNet; // LP welfare vs rebalancing ~= retailFees - arbProfitTrue
+    }
+
+    /// @dev External price P (token1 per token0) at `tick`, in WAD.
+    function _priceWad(int24 tick) internal pure returns (uint256) {
+        uint256 sp = uint256(TickMath.getSqrtPriceAtTick(tick));
+        return FullMath.mulDiv(sp * sp, 1e18, 1 << 192);
+    }
+
+    /// @dev Arb the pool to `target` and return the arb's inventory gain valued at that block's
+    ///      external price — the LVR extracted from LPs this block.
+    function _stepArb(ArbitrageAgent a, int24 target) internal returns (int256) {
+        (uint256 b0, uint256 b1) = a.balances();
+        a.arbToTick(target);
+        (uint256 a0, uint256 a1) = a.balances();
+        int256 d0 = int256(a0) - int256(b0);
+        int256 d1 = int256(a1) - int256(b1);
+        return d1 + (d0 * int256(_priceWad(target))) / 1e18;
+    }
+
+    /// @dev Run the block's retail swaps and return retail's inventory gain valued at `pWad`.
+    ///      (Negative: retail pays fees + impact — that value accrues to LPs.)
+    function _stepRetail(RetailFlow r, uint256 b, uint24 rf, uint256 pWad) internal returns (int256) {
+        (uint256 b0, uint256 b1) = r.balances();
+        for (uint256 j; j < RETAIL_PER_BLOCK; j++) {
+            r.noiseSwap(b * 10 + j, rf); // retail size shrinks with rf (fee-elastic)
+        }
+        (uint256 a0, uint256 a1) = r.balances();
+        int256 d0 = int256(a0) - int256(b0);
+        int256 d1 = int256(a1) - int256(b1);
+        return d1 + (d0 * int256(pWad)) / 1e18;
     }
 
     /// @dev Build a local dynamic-fee pool with agents (used by the instance tests).
@@ -84,12 +119,16 @@ abstract contract LVRSimBase is Test, Deployers {
         assertEq(address(hook), expected);
     }
 
+    uint256 internal lpCapital; // token1-value of the LP deposit at P=1, for normalizing LVR to bps
+
     function _addWideLiquidity(PoolKey memory k) internal {
-        modifyLiquidityRouter.modifyLiquidity(
+        BalanceDelta d = modifyLiquidityRouter.modifyLiquidity(
             k,
             ModifyLiquidityParams({tickLower: -6000, tickUpper: 6000, liquidityDelta: 1e21, salt: 0}),
             ZERO_BYTES
         );
+        // delta is negative (tokens paid in); |amount0| + |amount1| at P=1 = deposited capital
+        lpCapital = uint256(uint128(-d.amount0())) + uint256(uint128(-d.amount1()));
     }
 
     function _clamp(int24 t) internal pure returns (int24) {
@@ -129,14 +168,16 @@ abstract contract LVRSimBase is Test, Deployers {
         MockERC20(t1).transfer(address(r), 1e30);
 
         uint256 feeSum;
+        int256 arbGain; // arb inventory gain at trade-time external price (= LVR the arb extracts)
+        int256 retailGain; // retail inventory gain at external price (negative: fees + impact to LPs)
         for (uint256 b = 1; b <= NBLOCKS; b++) {
             vm.roll(block.number + 1);
-            a.arbToTick(_clamp(PricePath.tickAt(SEED, b, START_TICK, stepTicks)));
+            int24 target = _clamp(PricePath.tickAt(SEED, b, START_TICK, stepTicks));
+            uint256 pWad = _priceWad(target);
+            arbGain += _stepArb(a, target);
             uint24 rf = dynamic ? hook.currentFee(k) : fp.baseFee; // fee retail faces this block
             feeSum += rf;
-            for (uint256 j; j < RETAIL_PER_BLOCK; j++) {
-                r.noiseSwap(b * 10 + j, rf); // retail size shrinks with rf (fee-elastic)
-            }
+            retailGain += _stepRetail(r, b, rf, pWad);
         }
 
         res.arbInventory = a.inventoryValue(1e18, 1e30, 1e30);
@@ -145,6 +186,10 @@ abstract contract LVRSimBase is Test, Deployers {
         res.avgRetailFeePips = feeSum / NBLOCKS;
         res.retailVolume = r.totalVolume();
         res.retailFees = r.totalFeesPaid();
+        res.arbProfitTrue = arbGain;
+        // LP net vs rebalancing = -(value every counterparty extracts at the fair price). Fees make
+        // each counterparty's gain more negative, so they raise LP net; drift/adverse-selection lowers it.
+        res.lpNet = -(arbGain + retailGain);
     }
 }
 
@@ -189,6 +234,26 @@ contract LVRSimulationTest is LVRSimBase {
         assertGt(d.lpFeeValue, s.lpFeeValue);
         assertLt(d.arbInventory, s.arbInventory);
         assertGe(d.avgRetailFeePips, s.avgRetailFeePips);
+    }
+
+    /// @notice The honest metric: LP welfare against a rebalancing benchmark (fees minus the LVR the
+    ///         arbitrageur extracts, valued at trade-time prices) — not fee revenue.
+    function test_lpNetWelfare() public {
+        stepTicks = 200;
+        RunResult memory s = _run(false);
+        RunResult memory d = _run(true);
+        emit log_named_uint("LP capital (token1 units)     ", lpCapital);
+        emit log_named_int("LVR extracted, 0.1bps (static) ", _dbps(s.arbProfitTrue));
+        emit log_named_int("LVR extracted, 0.1bps (dynamic)", _dbps(d.arbProfitTrue));
+        emit log_named_int("LP net vs rebal, 0.1bps (static) ", _dbps(s.lpNet));
+        emit log_named_int("LP net vs rebal, 0.1bps (dynamic)", _dbps(d.lpNet));
+        // the dynamic fee should leave the LP better off net (shrinks the LVR the arb keeps)
+        assertGt(d.lpNet, s.lpNet);
+    }
+
+    /// @dev value in tenths of a basis point of LP capital (so sub-bps signals stay visible).
+    function _dbps(int256 v) internal view returns (int256) {
+        return lpCapital == 0 ? int256(0) : (v * 100000) / int256(lpCapital);
     }
 
     /// @notice The tradeoff. Fix the volatility, crank the fee aggressiveness (curve slope), and

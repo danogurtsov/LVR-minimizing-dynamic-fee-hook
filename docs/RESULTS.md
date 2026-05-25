@@ -8,6 +8,32 @@ token units, valued at a 1:1 price; treat them as ratios, not absolute LVR figur
 Fixed curve for every run: `baseFee 0.05% · floor 0.01% · cap 1.00% · slope 5e7`, EWMA `alpha 0.2`,
 per-block tick clamp `1000`. Path: 60 blocks, seed 42.
 
+## LP net welfare — the metric that matters (`test_lpNetWelfare`)
+
+Fee revenue is a proxy; the quantity that decides whether an LP should provide liquidity is **LP net
+vs a rebalancing benchmark = fees − LVR**, computed per-trade as −Σ (each counterparty's inventory
+gain valued at the *trade-time* external price) — the canonical Milionis et al. measure. Reported as
+**basis points of LP capital** (high-volatility regime, 60 blocks):
+
+| | LVR extracted | **LP net vs rebalancing** |
+|---|---:|---:|
+| static 0.05% | 36.3 bps | **−36.0 bps** |
+| dynamic | 0.2 bps | +0.9 bps |
+
+Under a static fee the LP is **net-negative** — LVR (36 bps) dwarfs fee income. This reproduces the
+well-documented result that most passive LPs lose to arbitrageurs; fee revenue never showed it, LP net
+does. The dynamic fee neutralizes it.
+
+> **Three honest caveats (work in progress).**
+> 1. **The arbitrageur is fee-inelastic** — it realigns the price fully each block regardless of the
+>    fee, so a wide fee just extracts a large fee on full volume. The dynamic figure is therefore an
+>    **upper bound**; a rational arb (trading only to the no-arbitrage band) would extract less and
+>    leave the pool mispriced. The **sign** is robust; the **magnitude** is not yet final.
+> 2. **LVR is normalized to total (wide-range) capital**, so it is a **floor** — a concentrated LP
+>    faces materially more (concentrated liquidity amplifies LVR).
+> 3. **No annualization** — bps are per-60-block window at synthetic volatility, fine for a matched
+>    comparison, not an absolute rate.
+
 ## Offline — fee-aggressiveness sweep (`test_feeAggressivenessSweep`)
 
 Volatility fixed; the fee curve's `slope` is cranked. Retail is fee-elastic (demand falls linearly

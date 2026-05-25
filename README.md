@@ -92,6 +92,23 @@ The claim "a volatility-indexed fee improves LP outcomes" is quantitative, so th
 it trades less as the fee rises — which is what turns the fee into a genuine tradeoff rather than free
 money.
 
+### What actually matters: LP net vs rebalancing
+
+Fee revenue is only a proxy. The quantity that decides whether an LP should provide liquidity is **net
+PnL vs a rebalancing benchmark = fees − LVR** (the canonical measure), reported as basis points of LP
+capital (high-volatility regime):
+
+| | LVR extracted | **LP net vs rebalancing** |
+|---|---:|---:|
+| static 0.05% | 36 bps | **−36 bps** |
+| dynamic | 0.2 bps | +0.9 bps |
+
+A static-fee LP is **net-negative** — LVR dwarfs fee income, the well-known "most passive LPs lose to
+arbitrageurs" result — and the fee neutralizes it. **Caveat:** the simulated arbitrageur is currently
+fee-inelastic, so the dynamic figure is an *upper bound* (a rational arb trades less and leaves the
+pool mispriced); the sign is robust, the magnitude is being refined. Method and caveats:
+[`docs/RESULTS.md`](docs/RESULTS.md).
+
 ### The tradeoff: there is an optimal fee, not "max fee"
 
 Fix the volatility and crank the fee's aggressiveness. LP revenue splits into two opposing forces

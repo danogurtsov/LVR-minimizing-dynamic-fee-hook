@@ -17,6 +17,8 @@ contract RetailFlow {
 
     PoolSwapTest internal immutable swapRouter;
     PoolKey internal key;
+    address internal immutable token0;
+    address internal immutable token1;
 
     uint256 public totalVolume; // cumulative intended retail size (demand actually placed)
     uint256 public totalFeesPaid; // cumulative fee retail paid (demand * fee)
@@ -24,8 +26,15 @@ contract RetailFlow {
     constructor(PoolSwapTest router_, PoolKey memory key_, address t0, address t1) {
         swapRouter = router_;
         key = key_;
+        token0 = t0;
+        token1 = t1;
         MockERC20(t0).approve(address(router_), type(uint256).max);
         MockERC20(t1).approve(address(router_), type(uint256).max);
+    }
+
+    function balances() external view returns (uint256 b0, uint256 b1) {
+        b0 = MockERC20(token0).balanceOf(address(this));
+        b1 = MockERC20(token1).balanceOf(address(this));
     }
 
     /// @notice A noise swap whose size shrinks with the `feePips` retail is charged.
