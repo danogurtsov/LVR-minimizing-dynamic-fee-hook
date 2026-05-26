@@ -104,10 +104,20 @@ capital (high-volatility regime):
 | dynamic | 0.2 bps | +0.9 bps |
 
 A static-fee LP is **net-negative** — LVR dwarfs fee income, the well-known "most passive LPs lose to
-arbitrageurs" result — and the fee neutralizes it. **Caveat:** the simulated arbitrageur is currently
-fee-inelastic, so the dynamic figure is an *upper bound* (a rational arb trades less and leaves the
-pool mispriced); the sign is robust, the magnitude is being refined. Method and caveats:
-[`docs/RESULTS.md`](docs/RESULTS.md).
+arbitrageurs" result — and the fee neutralizes it.
+
+**But that is against a *naive* 0.05% fee.** Against the **best** static fee for the regime, the
+dynamic fee does **not** win — at constant volatility there is nothing to adapt to, and on a
+time-varying path a realized-volatility EWMA is a *lagging* estimator that **mistimes** the fee (high
+right after a burst, low right into the next one); speeding it up only adds noise. So the honest
+finding so far is: **a realized-vol EWMA fee does not out-earn a well-tuned static fee on LP net.** Its
+real value is **composability** (an overlay on any pool, no liquidity migration) and this measurement
+framework; the open problem is a **forward-looking** volatility signal, not a backward EWMA.
+
+> **Status:** these numbers use a fee-inelastic arbitrageur (an upper bound on the dynamic side) and
+> uncalibrated parameters; a rational-arb model and calibration are in progress. The **direction** of
+> the findings is robust; the **magnitudes** are not final. Full method, caveats and the running
+> research log: [`docs/RESULTS.md`](docs/RESULTS.md).
 
 ### The tradeoff: there is an optimal fee, not "max fee"
 
@@ -142,10 +152,13 @@ aggressive it kills the retail franchise. Turning the fee to the max is the wron
 index is only useful if it's *tuned*, and the harness is what sizes it. (The `slope`/`maxFee`
 parameters are exactly this dial.)
 
-### Where it pays off: volatile pools, not stable ones
+### Fee-revenue mechanics across volatility regimes
 
-Sweeping the pool's volatility instead of the fee (matched static-vs-dynamic, seeded by **live mainnet
-pools** in the fork suite):
+> These figures are **fee revenue** (a proxy), not LP net — read them for how the fee *responds* to
+> volatility, not as evidence it beats a static fee (it does not, per the LP-net finding above).
+
+Sweeping the pool's volatility instead of the fee (matched dynamic-vs-naive-static, seeded by **live
+mainnet pools** in the fork suite):
 
 | Pool / regime | LP fees static → dynamic | LP lift | Avg retail fee (dyn) |
 |---|---|---:|---:|

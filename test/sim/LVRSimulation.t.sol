@@ -48,6 +48,9 @@ abstract contract LVRSimBase is Test, Deployers {
     uint256 internal constant NBLOCKS = 60;
     uint24 internal stepTicks = 120; // per-block volatility of the external path; overridable
     uint256 internal feeSlope = 5e7; // fee aggressiveness (curve slope); overridable
+    uint24 internal staticFeePips = 500; // fee of the static-pool baseline; overridable
+    bool internal varyingVol; // if true, volatility switches between calm and burst regimes over time
+    int24 internal _extTick; // running external tick for the varying-vol walk
     uint256 internal constant RETAIL_PER_BLOCK = 8; // retail-heavy flow, so volume drives LP fees
 
     struct RunResult {
@@ -137,6 +140,20 @@ abstract contract LVRSimBase is Test, Deployers {
         return t;
     }
 
+    /// @dev Per-block volatility for the regime-switching path: calm (30) and burst (300) in turns.
+    function _stepAt(uint256 b) internal pure returns (uint24) {
+        return ((b - 1) / 15) % 2 == 0 ? uint24(30) : uint24(300);
+    }
+
+    /// @dev One incremental random step of the external tick using block b's volatility regime.
+    function _walkStep(uint256 b) internal returns (int24) {
+        uint24 st = _stepAt(b);
+        uint256 h = uint256(keccak256(abi.encode(SEED, b)));
+        int256 delta = int256(h % (2 * uint256(st) + 1)) - int256(uint256(st));
+        _extTick = int24(int256(_extTick) + delta);
+        return _extTick;
+    }
+
     /// @notice Run the identical price path + retail flow against either a fixed-fee pool (no hook)
     ///         or the dynamic-fee pool, and return LP fee revenue, the arbitrageur's net inventory,
     ///         and the average fee retail paid.
@@ -154,7 +171,7 @@ abstract contract LVRSimBase is Test, Deployers {
                 currency0, currency1, IHooks(address(hook)), LPFeeLibrary.DYNAMIC_FEE_FLAG, 60, SQRT_PRICE_1_1
             );
         } else {
-            (k,) = initPool(currency0, currency1, IHooks(address(0)), fp.baseFee, 60, SQRT_PRICE_1_1);
+            (k,) = initPool(currency0, currency1, IHooks(address(0)), staticFeePips, 60, SQRT_PRICE_1_1);
         }
         _addWideLiquidity(k);
 
@@ -170,12 +187,14 @@ abstract contract LVRSimBase is Test, Deployers {
         uint256 feeSum;
         int256 arbGain; // arb inventory gain at trade-time external price (= LVR the arb extracts)
         int256 retailGain; // retail inventory gain at external price (negative: fees + impact to LPs)
+        _extTick = START_TICK;
         for (uint256 b = 1; b <= NBLOCKS; b++) {
             vm.roll(block.number + 1);
-            int24 target = _clamp(PricePath.tickAt(SEED, b, START_TICK, stepTicks));
+            int24 target =
+                _clamp(varyingVol ? _walkStep(b) : PricePath.tickAt(SEED, b, START_TICK, stepTicks));
             uint256 pWad = _priceWad(target);
             arbGain += _stepArb(a, target);
-            uint24 rf = dynamic ? hook.currentFee(k) : fp.baseFee; // fee retail faces this block
+            uint24 rf = dynamic ? hook.currentFee(k) : staticFeePips; // fee retail faces this block
             feeSum += rf;
             retailGain += _stepRetail(r, b, rf, pWad);
         }
@@ -254,6 +273,67 @@ contract LVRSimulationTest is LVRSimBase {
     /// @dev value in tenths of a basis point of LP capital (so sub-bps signals stay visible).
     function _dbps(int256 v) internal view returns (int256) {
         return lpCapital == 0 ? int256(0) : (v * 100000) / int256(lpCapital);
+    }
+
+    /// @notice WS1 — the honest baseline. At a FIXED volatility, sweep the static fee to find the best
+    ///         fixed choice, then compare the dynamic fee against THAT (not against a naive 0.05%).
+    ///         Prediction: at constant volatility the dynamic fee has little edge over the best static
+    ///         one — its value is temporal adaptation, which needs time-varying volatility (WS2).
+    function test_bestStaticBaseline() public {
+        stepTicks = 200;
+        uint24[6] memory fees = [uint24(100), 300, 1000, 3000, 6000, 10000];
+        int256 bestNet = type(int256).min;
+        uint24 bestFee;
+        for (uint256 i; i < fees.length; i++) {
+            staticFeePips = fees[i];
+            int256 net = _run(false).lpNet;
+            emit log_named_uint("static fee (pips)", fees[i]);
+            emit log_named_int("  LP net 0.1bps  ", _dbps(net));
+            if (net > bestNet) {
+                bestNet = net;
+                bestFee = fees[i];
+            }
+        }
+        int256 dyn = _run(true).lpNet;
+        emit log_named_uint("=> best static fee (pips)  ", bestFee);
+        emit log_named_int("=> best static LP net 0.1bps", _dbps(bestNet));
+        emit log_named_int("=> dynamic     LP net 0.1bps", _dbps(dyn));
+    }
+
+    /// @notice WS1b — the fair test for the hook. On a **time-varying** volatility path (calm and
+    ///         burst regimes in turns) a single static fee cannot fit both — too high overcharges the
+    ///         calm (retail flees), too low undercharges the bursts (LVR). The dynamic fee tracks the
+    ///         regime. This is where adaptivity should actually earn its keep.
+    function test_bestStaticBaseline_varyingVol() public {
+        varyingVol = true;
+
+        // best static
+        uint24[4] memory fees = [uint24(300), 1000, 3000, 10000];
+        int256 bestStatic = type(int256).min;
+        for (uint256 i; i < fees.length; i++) {
+            staticFeePips = fees[i];
+            int256 net = _run(false).lpNet;
+            if (net > bestStatic) bestStatic = net;
+        }
+
+        // best dynamic across a few estimator tunings (does a faster EWMA beat the lag?)
+        uint256[3] memory alphas = [uint256(0.2e18), 0.6e18, 0.95e18];
+        int256 bestDyn = type(int256).min;
+        uint256 bestAlpha;
+        for (uint256 i; i < alphas.length; i++) {
+            volCfg.alphaWad = alphas[i];
+            int256 net = _run(true).lpNet;
+            emit log_named_uint("dynamic alphaWad", alphas[i]);
+            emit log_named_int("  LP net 0.1bps ", _dbps(net));
+            if (net > bestDyn) {
+                bestDyn = net;
+                bestAlpha = alphas[i];
+            }
+        }
+
+        emit log_named_int("=> best static  LP net 0.1bps", _dbps(bestStatic));
+        emit log_named_uint("=> best dynamic alphaWad     ", bestAlpha);
+        emit log_named_int("=> best dynamic LP net 0.1bps", _dbps(bestDyn));
     }
 
     /// @notice The tradeoff. Fix the volatility, crank the fee aggressiveness (curve slope), and

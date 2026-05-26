@@ -34,6 +34,27 @@ does. The dynamic fee neutralizes it.
 > 3. **No annualization** — bps are per-60-block window at synthetic volatility, fine for a matched
 >    comparison, not an absolute rate.
 
+## The honest baseline — dynamic vs the BEST static fee (`test_bestStaticBaseline*`)
+
+The comparison above is against a naive 0.05% fee. The fair question is whether adaptivity beats the
+*best fixed* fee. Sweeping the static fee to find the best, then comparing the dynamic fee (LP net, bps):
+
+| Path | Best static fee | Best static LP net | Dynamic LP net |
+|---|---:|---:|---:|
+| constant high vol | 1.0% | +21.1 bps | +0.9 bps |
+| time-varying (calm↔burst) | 1.0% | +4.9 bps | −8.6 bps |
+
+**The dynamic fee does not beat the best static fee** — not at constant volatility (nothing to adapt
+to) and not on a time-varying path. On the varying path the realized-vol EWMA is *anti-phase* with the
+regime: the estimate is still low entering a burst (fee too low exactly when LVR is realized) and still
+high entering a calm (fee too high for retail). A faster EWMA makes it worse, not better — lag is
+structural to a backward-looking signal, not a tuning knob.
+
+The premise (a16z: optimal fee rises with volatility) holds; the instrument is wrong. The design's real
+value is **composability** and this measurement framework, and the open problem is a **forward-looking**
+volatility signal. *Caveat: fee-inelastic arb + uncalibrated params — direction robust, magnitudes not
+final (rational-arb model next).*
+
 ## Offline — fee-aggressiveness sweep (`test_feeAggressivenessSweep`)
 
 Volatility fixed; the fee curve's `slope` is cranked. Retail is fee-elastic (demand falls linearly
