@@ -51,8 +51,13 @@ not better — lag is structural to a backward-looking signal, not a tuning knob
 
 The premise (a16z: optimal fee rises with volatility) holds; the instrument is wrong. The design's real
 value is **composability** and this measurement framework, and the open problem is a **forward-looking**
-volatility signal. *Caveat: uncalibrated params, synthetic single-seed prices — direction robust,
-magnitudes not final.*
+volatility signal.
+
+**Robust across seeds (Monte Carlo, `test_monteCarlo_varyingVol`).** Over 5 seeds the dynamic fee loses
+to the best static fee every time — gap (dynamic − best-static) mean **−6.1 bps**, range [−8.0, −4.3],
+**0 / 5** seeds where dynamic wins. So the negative result is not a single-path fluke. *Caveat:
+uncalibrated params; synthetic regime-switching prices (Monte Carlo covers seed-variance, not real
+historical/jump prices) — direction robust, magnitudes not final.*
 
 ## Offline — fee-aggressiveness sweep (`test_feeAggressivenessSweep`)
 

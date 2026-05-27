@@ -44,7 +44,7 @@ abstract contract LVRSimBase is Test, Deployers {
 
     int24 internal constant START_TICK = 0;
     int24 internal constant RANGE = 3000;
-    uint256 internal constant SEED = 42;
+    uint256 internal seed = 42; // path seed; overridable for Monte Carlo
     uint256 internal constant NBLOCKS = 60;
     uint24 internal stepTicks = 120; // per-block volatility of the external path; overridable
     uint256 internal feeSlope = 5e7; // fee aggressiveness (curve slope); overridable
@@ -169,7 +169,7 @@ abstract contract LVRSimBase is Test, Deployers {
     /// @dev One incremental random step of the external tick using block b's volatility regime.
     function _walkStep(uint256 b) internal returns (int24) {
         uint24 st = _stepAt(b);
-        uint256 h = uint256(keccak256(abi.encode(SEED, b)));
+        uint256 h = uint256(keccak256(abi.encode(seed, b)));
         int256 delta = int256(h % (2 * uint256(st) + 1)) - int256(uint256(st));
         _extTick = int24(int256(_extTick) + delta);
         return _extTick;
@@ -212,7 +212,7 @@ abstract contract LVRSimBase is Test, Deployers {
         _residualSum = 0;
         for (uint256 b = 1; b <= NBLOCKS; b++) {
             vm.roll(block.number + 1);
-            int24 ext = _clamp(varyingVol ? _walkStep(b) : PricePath.tickAt(SEED, b, START_TICK, stepTicks));
+            int24 ext = _clamp(varyingVol ? _walkStep(b) : PricePath.tickAt(seed, b, START_TICK, stepTicks));
             uint256 pWad = _priceWad(ext);
             uint24 rf = dynamic ? hook.currentFee(k) : staticFeePips; // fee this block
             feeSum += rf;
@@ -243,7 +243,7 @@ contract LVRSimulationTest is LVRSimBase {
     function test_volatilePath_buildsVarianceAndRaisesFee() public {
         for (uint256 b = 1; b <= 40; b++) {
             vm.roll(block.number + 1);
-            arb.arbToTick(_clamp(PricePath.tickAt(SEED, b, START_TICK, stepTicks)));
+            arb.arbToTick(_clamp(PricePath.tickAt(seed, b, START_TICK, stepTicks)));
         }
         assertGt(hook.currentVariance(key), 0);
         assertGt(hook.currentFee(key), feeParams.baseFee);
@@ -252,7 +252,7 @@ contract LVRSimulationTest is LVRSimBase {
     function test_retailFlow_accruesLpFees() public {
         for (uint256 b = 1; b <= 30; b++) {
             vm.roll(block.number + 1);
-            arb.arbToTick(_clamp(PricePath.tickAt(SEED, b, START_TICK, stepTicks)));
+            arb.arbToTick(_clamp(PricePath.tickAt(seed, b, START_TICK, stepTicks)));
             retail.noiseSwap(b, hook.currentFee(key));
         }
         uint128 liq = manager.getLiquidity(key.toId());
@@ -322,6 +322,36 @@ contract LVRSimulationTest is LVRSimBase {
         emit log_named_uint("=> best static fee (pips)  ", bestFee);
         emit log_named_int("=> best static LP net 0.1bps", _dbps(bestNet));
         emit log_named_int("=> dynamic     LP net 0.1bps", _dbps(dyn));
+    }
+
+    /// @notice WS2 — Monte Carlo. Is "dynamic loses to the best static fee" robust across seeds, or an
+    ///         artifact of one path? Runs the varying-vol comparison over several seeds and reports the
+    ///         distribution of the gap (dynamic − best-static). best-static ~= 1% (from WS1).
+    function test_monteCarlo_varyingVol() public {
+        varyingVol = true;
+        staticFeePips = 10_000; // best static from the WS1 sweep
+        uint256[5] memory seeds = [uint256(1), 7, 42, 99, 123];
+        int256 sumGap;
+        int256 minGap = type(int256).max;
+        int256 maxGap = type(int256).min;
+        uint256 dynWins;
+        for (uint256 i; i < seeds.length; i++) {
+            seed = seeds[i];
+            int256 st = _run(false).lpNet;
+            int256 dy = _run(true).lpNet;
+            int256 gap = dy - st; // < 0 => dynamic worse than best static
+            sumGap += gap;
+            if (gap < minGap) minGap = gap;
+            if (gap > maxGap) maxGap = gap;
+            if (dy > st) dynWins++;
+            emit log_named_uint("seed", seeds[i]);
+            emit log_named_int("  best-static LP net 0.1bps", _dbps(st));
+            emit log_named_int("  dynamic     LP net 0.1bps", _dbps(dy));
+        }
+        emit log_named_int("mean gap (dyn-stat) 0.1bps", _dbps(sumGap / int256(seeds.length)));
+        emit log_named_int("min  gap 0.1bps           ", _dbps(minGap));
+        emit log_named_int("max  gap 0.1bps           ", _dbps(maxGap));
+        emit log_named_uint("seeds where dynamic wins  ", dynWins);
     }
 
     /// @notice WS1b — the fair test for the hook. On a **time-varying** volatility path (calm and
