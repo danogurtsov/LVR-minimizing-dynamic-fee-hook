@@ -15,24 +15,22 @@ vs a rebalancing benchmark = fees − LVR**, computed per-trade as −Σ (each c
 gain valued at the *trade-time* external price) — the canonical Milionis et al. measure. Reported as
 **basis points of LP capital** (high-volatility regime, 60 blocks):
 
-| | LVR extracted | **LP net vs rebalancing** |
-|---|---:|---:|
-| static 0.05% | 36.3 bps | **−36.0 bps** |
-| dynamic | 0.2 bps | +0.9 bps |
+| | LVR extracted | **LP net vs rebalancing** | Residual mispricing |
+|---|---:|---:|---:|
+| static 0.05% | 36.5 bps | **−36.2 bps** | 4 ticks |
+| dynamic | 23.1 bps | **−21.7 bps** | 38 ticks |
 
-Under a static fee the LP is **net-negative** — LVR (36 bps) dwarfs fee income. This reproduces the
-well-documented result that most passive LPs lose to arbitrageurs; fee revenue never showed it, LP net
-does. The dynamic fee neutralizes it.
+The arbitrageur here is **rational** — it trades only to the no-arbitrage band (stops when mispricing
+= fee). Both fees leave the LP **net-negative**: LVR dwarfs fee income, the well-documented "most
+passive LPs lose to arbitrageurs" result, and the fee *mitigates* it (−36 → −22 bps) but does not erase
+it. The dynamic fee reduces the LVR the arb keeps — **but at a cost**: a wider fee makes the arb stop
+earlier, leaving the pool ~38 ticks (~0.38%) **mispriced**, so retail inherits staler prices. Less LVR,
+more staleness.
 
-> **Three honest caveats (work in progress).**
-> 1. **The arbitrageur is fee-inelastic** — it realigns the price fully each block regardless of the
->    fee, so a wide fee just extracts a large fee on full volume. The dynamic figure is therefore an
->    **upper bound**; a rational arb (trading only to the no-arbitrage band) would extract less and
->    leave the pool mispriced. The **sign** is robust; the **magnitude** is not yet final.
-> 2. **LVR is normalized to total (wide-range) capital**, so it is a **floor** — a concentrated LP
->    faces materially more (concentrated liquidity amplifies LVR).
-> 3. **No annualization** — bps are per-60-block window at synthetic volatility, fine for a matched
->    comparison, not an absolute rate.
+> **Remaining caveats.** (1) LVR is normalized to total (wide-range) capital, so it is a **floor** — a
+> concentrated LP faces more. (2) Parameters (elasticity, depth, curve) are uncalibrated. (3) Prices
+> are synthetic and single-seed (no jumps, no confidence intervals). (4) No annualization. Direction is
+> robust; exact bps are not.
 
 ## The honest baseline — dynamic vs the BEST static fee (`test_bestStaticBaseline*`)
 
@@ -41,19 +39,20 @@ The comparison above is against a naive 0.05% fee. The fair question is whether 
 
 | Path | Best static fee | Best static LP net | Dynamic LP net |
 |---|---:|---:|---:|
-| constant high vol | 1.0% | +21.1 bps | +0.9 bps |
-| time-varying (calm↔burst) | 1.0% | +4.9 bps | −8.6 bps |
+| constant high vol | 1.0% | −14.0 bps | −21.7 bps |
+| time-varying (calm↔burst) | 1.0% | −12.5 bps | −18.4 bps |
 
 **The dynamic fee does not beat the best static fee** — not at constant volatility (nothing to adapt
-to) and not on a time-varying path. On the varying path the realized-vol EWMA is *anti-phase* with the
-regime: the estimate is still low entering a burst (fee too low exactly when LVR is realized) and still
-high entering a calm (fee too high for retail). A faster EWMA makes it worse, not better — lag is
-structural to a backward-looking signal, not a tuning knob.
+to) and not on a time-varying path. With a rational arb every fee is LP-negative; the best static fee
+simply loses least, and the dynamic fee loses more. On the varying path the realized-vol EWMA is
+*anti-phase* with the regime: the estimate is still low entering a burst (fee too low exactly when LVR
+is realized) and still high entering a calm (fee too high for retail). A faster EWMA makes it worse,
+not better — lag is structural to a backward-looking signal, not a tuning knob.
 
 The premise (a16z: optimal fee rises with volatility) holds; the instrument is wrong. The design's real
 value is **composability** and this measurement framework, and the open problem is a **forward-looking**
-volatility signal. *Caveat: fee-inelastic arb + uncalibrated params — direction robust, magnitudes not
-final (rational-arb model next).*
+volatility signal. *Caveat: uncalibrated params, synthetic single-seed prices — direction robust,
+magnitudes not final.*
 
 ## Offline — fee-aggressiveness sweep (`test_feeAggressivenessSweep`)
 

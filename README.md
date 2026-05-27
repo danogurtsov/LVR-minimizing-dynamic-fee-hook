@@ -98,26 +98,29 @@ Fee revenue is only a proxy. The quantity that decides whether an LP should prov
 PnL vs a rebalancing benchmark = fees − LVR** (the canonical measure), reported as basis points of LP
 capital (high-volatility regime):
 
-| | LVR extracted | **LP net vs rebalancing** |
-|---|---:|---:|
-| static 0.05% | 36 bps | **−36 bps** |
-| dynamic | 0.2 bps | +0.9 bps |
+| | LVR extracted | **LP net vs rebalancing** | Residual mispricing |
+|---|---:|---:|---:|
+| static 0.05% | 36 bps | **−36 bps** | 4 ticks |
+| dynamic | 23 bps | **−22 bps** | 38 ticks |
 
-A static-fee LP is **net-negative** — LVR dwarfs fee income, the well-known "most passive LPs lose to
-arbitrageurs" result — and the fee neutralizes it.
+Against a rational arbitrageur (one that trades only to the no-arbitrage band), **both fees leave the
+LP net-negative** — LVR dwarfs fee income, the well-known "most passive LPs lose to arbitrageurs"
+result — and the fee *mitigates* it (−36 → −22 bps) without erasing it. And the dynamic fee's LVR
+reduction has a **cost**: the wider fee makes the arb stop earlier, leaving the pool ~38 ticks (~0.38%)
+mispriced, so retail inherits staler prices.
 
-**But that is against a *naive* 0.05% fee.** Against the **best** static fee for the regime, the
-dynamic fee does **not** win — at constant volatility there is nothing to adapt to, and on a
-time-varying path a realized-volatility EWMA is a *lagging* estimator that **mistimes** the fee (high
-right after a burst, low right into the next one); speeding it up only adds noise. So the honest
-finding so far is: **a realized-vol EWMA fee does not out-earn a well-tuned static fee on LP net.** Its
-real value is **composability** (an overlay on any pool, no liquidity migration) and this measurement
-framework; the open problem is a **forward-looking** volatility signal, not a backward EWMA.
+**And against the *best* static fee (not the naive 0.05%), the dynamic fee does not win** — at constant
+volatility there is nothing to adapt to, and on a time-varying path a realized-volatility EWMA is a
+*lagging* estimator that **mistimes** the fee (high right after a burst, low right into the next one);
+speeding it up only adds noise. So the honest finding is: **a realized-vol EWMA fee does not out-earn a
+well-tuned static fee on LP net.** Its real value is **composability** (an overlay on any pool, no
+liquidity migration) and this measurement framework; the open problem is a **forward-looking**
+volatility signal, not a backward EWMA.
 
-> **Status:** these numbers use a fee-inelastic arbitrageur (an upper bound on the dynamic side) and
-> uncalibrated parameters; a rational-arb model and calibration are in progress. The **direction** of
-> the findings is robust; the **magnitudes** are not final. Full method, caveats and the running
-> research log: [`docs/RESULTS.md`](docs/RESULTS.md).
+> **Status:** parameters are uncalibrated and prices are synthetic/single-seed; calibration, realistic
+> price series, and confidence intervals are in progress. The **direction** of the findings is robust;
+> the **magnitudes** are not final. Full method, caveats and the running research log:
+> [`docs/RESULTS.md`](docs/RESULTS.md).
 
 ### The tradeoff: there is an optimal fee, not "max fee"
 

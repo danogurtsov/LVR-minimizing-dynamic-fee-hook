@@ -61,6 +61,7 @@ abstract contract LVRSimBase is Test, Deployers {
         uint256 retailFees; // fee revenue from retail (Laffer: peaks then falls with aggressiveness)
         int256 arbProfitTrue; // arb profit valued at trade-time external price = LVR extracted from LPs
         int256 lpNet; // LP welfare vs rebalancing ~= retailFees - arbProfitTrue
+        uint256 avgResidualTicks; // mean mispricing left in the pool by the rational arb (staleness)
     }
 
     /// @dev External price P (token1 per token0) at `tick`, in WAD.
@@ -69,15 +70,35 @@ abstract contract LVRSimBase is Test, Deployers {
         return FullMath.mulDiv(sp * sp, 1e18, 1 << 192);
     }
 
-    /// @dev Arb the pool to `target` and return the arb's inventory gain valued at that block's
-    ///      external price — the LVR extracted from LPs this block.
-    function _stepArb(ArbitrageAgent a, int24 target) internal returns (int256) {
+    uint256 internal _residualSum; // sum over blocks of |pool tick - external tick| left after the arb
+
+    /// @dev A **rational** arbitrageur: it only trades until the mispricing equals the fee, leaving
+    ///      the pool inside a no-arb band of ~`feePips` around the external price. Returns the arb's
+    ///      inventory gain valued at the FAIR external price (the LVR extracted), and accumulates the
+    ///      residual mispricing the pool is left with (the staleness retail then inherits).
+    function _stepArb(ArbitrageAgent a, int24 ext, uint24 feePips, PoolKey memory k)
+        internal
+        returns (int256)
+    {
+        (, int24 p,,) = manager.getSlot0(k.toId());
+        int24 band = int24(uint24(feePips / 100)); // pips -> ticks: 1% (10000) => 100 ticks
+        int24 target;
+        if (p < ext - band) {
+            target = ext - band; // pool too cheap: buy up to the band edge
+        } else if (p > ext + band) {
+            target = ext + band; // pool too dear: sell down to the band edge
+        } else {
+            _residualSum += uint256(uint24(p > ext ? p - ext : ext - p)); // already inside the band
+            return 0;
+        }
+
         (uint256 b0, uint256 b1) = a.balances();
         a.arbToTick(target);
         (uint256 a0, uint256 a1) = a.balances();
         int256 d0 = int256(a0) - int256(b0);
         int256 d1 = int256(a1) - int256(b1);
-        return d1 + (d0 * int256(_priceWad(target))) / 1e18;
+        _residualSum += uint256(uint24(band)); // pool left mispriced by ~the fee band
+        return d1 + (d0 * int256(_priceWad(ext))) / 1e18;
     }
 
     /// @dev Run the block's retail swaps and return retail's inventory gain valued at `pWad`.
@@ -188,14 +209,14 @@ abstract contract LVRSimBase is Test, Deployers {
         int256 arbGain; // arb inventory gain at trade-time external price (= LVR the arb extracts)
         int256 retailGain; // retail inventory gain at external price (negative: fees + impact to LPs)
         _extTick = START_TICK;
+        _residualSum = 0;
         for (uint256 b = 1; b <= NBLOCKS; b++) {
             vm.roll(block.number + 1);
-            int24 target =
-                _clamp(varyingVol ? _walkStep(b) : PricePath.tickAt(SEED, b, START_TICK, stepTicks));
-            uint256 pWad = _priceWad(target);
-            arbGain += _stepArb(a, target);
-            uint24 rf = dynamic ? hook.currentFee(k) : staticFeePips; // fee retail faces this block
+            int24 ext = _clamp(varyingVol ? _walkStep(b) : PricePath.tickAt(SEED, b, START_TICK, stepTicks));
+            uint256 pWad = _priceWad(ext);
+            uint24 rf = dynamic ? hook.currentFee(k) : staticFeePips; // fee this block
             feeSum += rf;
+            arbGain += _stepArb(a, ext, rf, k);
             retailGain += _stepRetail(r, b, rf, pWad);
         }
 
@@ -209,6 +230,7 @@ abstract contract LVRSimBase is Test, Deployers {
         // LP net vs rebalancing = -(value every counterparty extracts at the fair price). Fees make
         // each counterparty's gain more negative, so they raise LP net; drift/adverse-selection lowers it.
         res.lpNet = -(arbGain + retailGain);
+        res.avgResidualTicks = _residualSum / NBLOCKS;
     }
 }
 
@@ -266,6 +288,8 @@ contract LVRSimulationTest is LVRSimBase {
         emit log_named_int("LVR extracted, 0.1bps (dynamic)", _dbps(d.arbProfitTrue));
         emit log_named_int("LP net vs rebal, 0.1bps (static) ", _dbps(s.lpNet));
         emit log_named_int("LP net vs rebal, 0.1bps (dynamic)", _dbps(d.lpNet));
+        emit log_named_uint("residual mispricing ticks (static) ", s.avgResidualTicks);
+        emit log_named_uint("residual mispricing ticks (dynamic)", d.avgResidualTicks);
         // the dynamic fee should leave the LP better off net (shrinks the LVR the arb keeps)
         assertGt(d.lpNet, s.lpNet);
     }
