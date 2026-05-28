@@ -112,8 +112,10 @@ mispriced, so retail inherits staler prices.
 **And against the *best* static fee (not the naive 0.05%), the dynamic fee does not win** — at constant
 volatility there is nothing to adapt to, and on a time-varying path a realized-volatility EWMA is a
 *lagging* estimator that **mistimes** the fee (high right after a burst, low right into the next one);
-speeding it up only adds noise. So the honest finding is: **a realized-vol EWMA fee does not out-earn a
-well-tuned static fee on LP net.** Its real value is **composability** (an overlay on any pool, no
+speeding it up only adds noise. The clearest evidence: after a calm stretch a jump pays a **0.05% fee
+on the exact block it moves the price, and the fee only jumps to 1.0% the block after** — a 19×
+undercharge, no manipulation required. So the honest finding is: **a realized-vol EWMA fee does not
+out-earn a well-tuned static fee on LP net.** Its real value is **composability** (an overlay on any pool, no
 liquidity migration) and this measurement framework; the open problem is a **forward-looking**
 volatility signal, not a backward EWMA.
 

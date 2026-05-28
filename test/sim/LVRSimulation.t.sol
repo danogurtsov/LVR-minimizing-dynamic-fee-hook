@@ -259,6 +259,29 @@ contract LVRSimulationTest is LVRSimBase {
         assertGt(StatsCollector.lpFeeValue(manager, key.toId(), liq, 1e18), 0);
     }
 
+    /// @notice WS5 — the lag is exploitable. After a calm stretch the fee sits at its base; a large
+    ///         informed move (a "jump") then pays that low pre-jump fee, and the protective fee only
+    ///         appears on the NEXT block — after the value has already left the pool.
+    function test_lagIsExploitable() public {
+        // calm: tiny moves for 20 blocks, so the volatility estimate stays near zero
+        for (uint256 b = 1; b <= 20; b++) {
+            vm.roll(block.number + 1);
+            arb.arbToTick(int24(int256(b % 3)) * 5);
+        }
+        uint24 feeOnJump = hook.currentFee(key); // fee an attacker faces when timing a jump now
+
+        // a large informed move arrives
+        vm.roll(block.number + 1);
+        arb.arbToTick(2000);
+        uint24 feeAfterJump = hook.currentFee(key); // the fee that would have deterred it — too late
+
+        emit log_named_uint("fee charged ON the jump (pips) ", feeOnJump);
+        emit log_named_uint("fee AFTER the jump (pips)      ", feeAfterJump);
+        // the deterrent fee shows up only after the move; the jump itself was cheap
+        assertLt(feeOnJump, feeAfterJump);
+        assertLe(feeOnJump, 2 * feeParams.baseFee); // the jump paid ~the base fee, not a burst fee
+    }
+
     function test_dynamicFee_liftsLpRevenue() public {
         RunResult memory s = _run(false);
         RunResult memory d = _run(true);

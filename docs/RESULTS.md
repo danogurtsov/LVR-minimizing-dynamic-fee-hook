@@ -59,6 +59,21 @@ to the best static fee every time — gap (dynamic − best-static) mean **−6.
 uncalibrated params; synthetic regime-switching prices (Monte Carlo covers seed-variance, not real
 historical/jump prices) — direction robust, magnitudes not final.*
 
+### Why: the fee is one block late (`test_lagIsExploitable`)
+
+The single clearest number in the study. After a calm stretch the estimate is low, so the fee is at
+base; a large informed move then pays that pre-jump fee, and the deterrent fee only appears on the next
+block — after the value has left:
+
+| | Fee (pips) |
+|---|---:|
+| charged **on** the jump | 526 (0.05%) |
+| the block **after** the jump | 10,000 (1.0%) |
+
+A **19× undercharge on the exact block that matters** — and no manipulation is required, just timing.
+This lag is the mechanism behind every result above: a backward-looking estimator cannot price a move
+it has not seen yet.
+
 ## Offline — fee-aggressiveness sweep (`test_feeAggressivenessSweep`)
 
 Volatility fixed; the fee curve's `slope` is cranked. Retail is fee-elastic (demand falls linearly
