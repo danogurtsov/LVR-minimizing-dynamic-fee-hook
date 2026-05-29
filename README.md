@@ -5,8 +5,17 @@
 ![Foundry](https://img.shields.io/badge/built%20with-Foundry-000000?logo=foundry&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue)
 
-A Uniswap **v4 hook** that sets the LP fee from the pool's own realized volatility, to reduce
-**loss-versus-rebalancing (LVR)** — the volatility tax passive liquidity providers pay to arbitrageurs.
+A Uniswap **v4 hook** that sets the LP fee from the pool's own realized volatility to fight
+**loss-versus-rebalancing (LVR)** — the volatility tax passive liquidity providers pay to arbitrageurs
+— *and a rigorous, self-critical evaluation of whether a volatility-indexed fee actually works.*
+
+> **Bottom line up front.** Built as designed and measured honestly (rational arbitrageur, LP net vs a
+> rebalancing benchmark), the hook **reduces the LVR arbitrageurs extract but does not beat a well-tuned
+> static fee** — and it loses on every one of 5 Monte-Carlo seeds. The reason is structural: a
+> backward-looking EWMA is *one block late* (a jump pays 0.05% while the deterrent 1% fee arrives the
+> block after). The real value here is the **measurement framework** and **composability** (an overlay
+> on any pool); the open problem is a **forward-looking** volatility signal. Full evidence below and in
+> [`docs/RESULTS.md`](docs/RESULTS.md). This is the honest result, not the marketing one.
 
 ## The problem: passive LPs pay a volatility tax called LVR
 
@@ -202,6 +211,30 @@ POOL_MANAGER=<v4 PoolManager> forge script script/Deploy.s.sol --rpc-url <rpc> -
 
 The script mines a hook address whose low bits encode the permission set
 (`afterInitialize | beforeSwap | afterSwap`) and deploys via the canonical CREATE2 deployer.
+
+## Prior art
+
+The idea of a volatility-indexed fee is not new, and the honest place for this repo is next to the
+work that inspired it:
+
+- **Milionis, Moallemi, Roughgarden, Zhang (2022)** — the LVR framework this project measures against.
+- **a16z, "optimal fee design"** — shows the optimal fee rises with volatility (the premise here); this
+  study is a concrete demonstration that a *backward-looking* estimator is the wrong instrument for it.
+- **arXiv 2606.23070, "Mitigating Adverse Selection in Concentrated Liquidity AMMs with Dynamic Fees"**
+  — academic dynamic-fee designs for the same problem; consistent with our finding that forward-looking
+  / smarter signals are what's needed.
+- **Arrakis Pro Hook, Bunni v2** — shipped v4 systems that pursue LVR/MEV-aware market-making with more
+  sophisticated (often off-chain-assisted) signals.
+
+What this repo adds is not a better fee but an **honest, reproducible measurement harness** and a clear
+negative result for the simplest fully on-chain design (a realized-vol EWMA).
+
+## Formal properties
+
+`FeeCurve`'s core guarantees — monotonicity in variance and `minFee ≤ fee ≤ maxFee` — are exercised by
+fuzzing (`test/unit`) and asserted as an invariant across 128k swaps (`test/invariant`). A symbolic
+spec for a prover (Halmos) is in [`test/halmos/`](test/halmos/); the properties are **fuzz- and
+invariant-checked, not yet machine-proved**.
 
 ## Security
 
