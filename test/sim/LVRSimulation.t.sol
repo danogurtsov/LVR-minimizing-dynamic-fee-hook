@@ -259,6 +259,25 @@ contract LVRSimulationTest is LVRSimBase {
         assertGt(StatsCollector.lpFeeValue(manager, key.toId(), liq, 1e18), 0);
     }
 
+    /// @notice #2 — annualization. At synthetic vol our per-window bps are uninterpretable; calibrated
+    ///         to a realistic per-block move (~ETH 5%/day at 12s blocks) and annualized, LVR should land
+    ///         near the literature's ~11%/yr — a check that the harness is grounded in reality.
+    function test_annualizedLVR() public {
+        stepTicks = 10; // ~ ETH daily vol at a 12s block clock
+        RunResult memory s = _run(false);
+        emit log_named_int("LVR    bps/year (static, sigma~5%/day)", _annualBps(s.arbProfitTrue));
+        emit log_named_int("LP net bps/year (static)             ", _annualBps(s.lpNet));
+        // for reference, the extreme regime used elsewhere (annualizes to an absurd rate — proof that
+        // the headline per-window bps are at an unrealistic volatility):
+        stepTicks = 200;
+        RunResult memory hi = _run(false);
+        emit log_named_int("LVR    bps/year (static, extreme vol)", _annualBps(hi.arbProfitTrue));
+
+        // sanity: LVR scales up with volatility; realistic vol is in a sane band, extreme is not
+        assertGt(_annualBps(hi.arbProfitTrue), _annualBps(s.arbProfitTrue));
+        assertLt(_annualBps(s.arbProfitTrue), 5000); // realistic-vol LVR < 50%/yr
+    }
+
     /// @notice Chart data — the LVR-vs-staleness tradeoff. As the (static) fee rises, the LVR the arb
     ///         extracts falls but the residual mispricing (staleness retail inherits) rises. You buy
     ///         one with the other. Also logs LP net, which is non-monotone-ish across the sweep.
@@ -354,6 +373,16 @@ contract LVRSimulationTest is LVRSimBase {
     /// @dev value in tenths of a basis point of LP capital (so sub-bps signals stay visible).
     function _dbps(int256 v) internal view returns (int256) {
         return lpCapital == 0 ? int256(0) : (v * 100000) / int256(lpCapital);
+    }
+
+    uint256 internal constant BLOCK_SECONDS = 12;
+    uint256 internal constant SECONDS_PER_YEAR = 31_536_000;
+
+    /// @dev a per-run total, as basis points of LP capital, scaled from the run's duration to a year.
+    function _annualBps(int256 totalOverRun) internal view returns (int256) {
+        if (lpCapital == 0) return 0;
+        int256 mult = int256(SECONDS_PER_YEAR / (NBLOCKS * BLOCK_SECONDS)); // run -> year
+        return (totalOverRun * 10000 * mult) / int256(lpCapital);
     }
 
     /// @notice WS1 — the honest baseline. At a FIXED volatility, sweep the static fee to find the best

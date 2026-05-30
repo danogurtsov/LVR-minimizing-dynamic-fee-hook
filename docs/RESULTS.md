@@ -8,6 +8,15 @@ token units, valued at a 1:1 price; treat them as ratios, not absolute LVR figur
 Fixed curve for every run: `baseFee 0.05% · floor 0.01% · cap 1.00% · slope 5e7`, EWMA `alpha 0.2`,
 per-block tick clamp `1000`. Path: 60 blocks, seed 42.
 
+## Reality check — annualization (`test_annualizedLVR`)
+
+The bps figures below are per-run (60 blocks) at a **deliberately high** synthetic volatility, chosen so
+the mechanics are visible. Annualized with a 12s block clock, that regime implies an absurd LVR
+(~16,000 %/yr) — so **treat the absolute magnitudes as illustrative, not real.** Re-run at a realistic
+volatility (≈ ETH 5%/day) the annualized LVR is **~19 %/yr**, the same order as the literature's ~11 %/yr
+— a check that the harness is grounded. All the comparisons in this doc are **matched** (same path both
+sides), so their *direction and ranking* are robust even though their absolute size is not calibrated.
+
 ## LP net welfare — the metric that matters (`test_lpNetWelfare`)
 
 Fee revenue is a proxy; the quantity that decides whether an LP should provide liquidity is **LP net
