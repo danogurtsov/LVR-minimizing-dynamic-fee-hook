@@ -166,24 +166,58 @@ aggressive it kills the retail franchise. Turning the fee to the max is the wron
 index is only useful if it's *tuned*, and the harness is what sizes it. (The `slope`/`maxFee`
 parameters are exactly this dial.)
 
-### Fee-revenue mechanics across volatility regimes
+### The two-sided results (measured, not asserted)
 
-> These figures are **fee revenue** (a proxy), not LP net — read them for how the fee *responds* to
-> volatility, not as evidence it beats a static fee (it does not, per the LP-net finding above).
+Where the answer is a genuine tradeoff or a negative, it is shown, not hidden behind an "everything
+goes up" chart.
 
-Sweeping the pool's volatility instead of the fee (matched dynamic-vs-naive-static, seeded by **live
-mainnet pools** in the fork suite):
+**You buy LVR reduction with staleness.** As the fee rises, the LVR the arbitrageur extracts falls, but
+the residual mispricing it leaves (the staleness retail then trades against) rises — they cross.
 
-| Pool / regime | LP fees static → dynamic | LP lift | Avg retail fee (dyn) |
-|---|---|---:|---:|
-| USDC/USDT — stable | 0.0149 → 0.0167 | **1.1×** | 0.057% |
-| ETH/USDC — mid | 0.0861 → 0.4116 | 4.8× | 0.249% |
-| WBTC/ETH — volatile | 0.1526 → 1.9986 | **13.1×** | 0.673% |
+```mermaid
+xychart-beta
+    title "LVR extracted (falling) vs residual mispricing (rising), x = fee %"
+    x-axis "fee (%)" [0.01, 0.03, 0.1, 0.3, 0.6, 1.0]
+    y-axis "bps  |  ticks" 0 --> 80
+    line [38, 37, 33, 25, 18, 14]
+    line [1, 2, 9, 28, 52, 78]
+```
 
-The hook earns its keep in volatile, arbitrage-heavy pools and is **near-neutral in stable ones** —
-low volatility pins the fee at the floor, so retail there still pays ~the base fee. No benefit and no
-harm where there is no LVR to recapture. Full tables, method and caveats:
-[`docs/RESULTS.md`](docs/RESULTS.md).
+**The fee is one block late.** Through a calm stretch and *on the jump block itself* the fee sits at
+~0.05%; it only spikes to 1% the block *after* — after the value has left.
+
+```mermaid
+xychart-beta
+    title "Fee charged per block (%): calm -> JUMP -> after"
+    x-axis [c1, c2, c3, c4, c5, c6, JUMP, a1, a2, a3, a4]
+    y-axis "fee (%)" 0 --> 1
+    line [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 1.0, 1.0, 1.0, 1.0]
+```
+
+**Dynamic loses to the best static fee** — LPs lose vs rebalancing either way (bars are the loss
+magnitude, lower is better), and the dynamic bar is *taller* (worse) in both regimes.
+
+```mermaid
+xychart-beta
+    title "LP loss vs rebalancing (bps, lower = better): best-static vs dynamic (taller)"
+    x-axis [constant vol, varying vol]
+    y-axis "LP loss (bps)" 0 --> 25
+    bar [14, 12.5]
+    bar [22, 18.4]
+```
+
+**And it is not a single-path fluke** — the dynamic fee's shortfall vs best-static is positive (worse)
+on all 5 Monte-Carlo seeds.
+
+```mermaid
+xychart-beta
+    title "How much worse dynamic is than best-static (bps), per seed"
+    x-axis [s1, s7, s42, s99, s123]
+    y-axis "shortfall (bps)" 0 --> 9
+    bar [4.3, 6.5, 5.9, 6.2, 8.0]
+```
+
+Full tables, method and caveats: [`docs/RESULTS.md`](docs/RESULTS.md).
 
 ## Running the tests
 

@@ -259,6 +259,40 @@ contract LVRSimulationTest is LVRSimBase {
         assertGt(StatsCollector.lpFeeValue(manager, key.toId(), liq, 1e18), 0);
     }
 
+    /// @notice Chart data — the LVR-vs-staleness tradeoff. As the (static) fee rises, the LVR the arb
+    ///         extracts falls but the residual mispricing (staleness retail inherits) rises. You buy
+    ///         one with the other. Also logs LP net, which is non-monotone-ish across the sweep.
+    function test_chartData_tradeoff() public {
+        stepTicks = 200;
+        uint24[6] memory fees = [uint24(100), 300, 1000, 3000, 6000, 10000];
+        for (uint256 i; i < fees.length; i++) {
+            staticFeePips = fees[i];
+            RunResult memory s = _run(false);
+            emit log_named_uint("fee pips        ", fees[i]);
+            emit log_named_int("  LVR bps       ", _dbps(s.arbProfitTrue) / 10);
+            emit log_named_uint("  residual ticks", s.avgResidualTicks);
+            emit log_named_int("  LP net bps    ", _dbps(s.lpNet) / 10);
+        }
+    }
+
+    /// @notice Chart data — the lag. Fee per block through a calm stretch, a jump, and the aftermath.
+    ///         It stays at base through calm AND on the jump block, then spikes — one block too late.
+    function test_chartData_lagTrace() public {
+        for (uint256 b = 1; b <= 6; b++) {
+            vm.roll(block.number + 1);
+            emit log_named_uint("calm block fee pips", hook.currentFee(key)); // fee this block pays
+            arb.arbToTick(int24(int256(b % 3)) * 5); // calm
+        }
+        vm.roll(block.number + 1);
+        emit log_named_uint("JUMP block fee pips", hook.currentFee(key)); // what the jump pays: still base
+        arb.arbToTick(2000); // the jump
+        for (uint256 b = 1; b <= 4; b++) {
+            vm.roll(block.number + 1);
+            emit log_named_uint("after-jump fee pips", hook.currentFee(key)); // spikes: one block late
+            arb.arbToTick(2000 + int24(int256(b)) * 10); // aftermath
+        }
+    }
+
     /// @notice WS5 — the lag is exploitable. After a calm stretch the fee sits at its base; a large
     ///         informed move (a "jump") then pays that low pre-jump fee, and the protective fee only
     ///         appears on the NEXT block — after the value has already left the pool.
