@@ -40,7 +40,7 @@ abstract contract LVRSimBase is Test, Deployers {
     FeeCurve.Params internal feeParams =
         FeeCurve.Params({baseFee: 500, minFee: 100, maxFee: 10_000, slope: 5e7});
     RealizedVolatility.Config internal volCfg =
-        RealizedVolatility.Config({maxAbsTickMove: 1000, alphaWad: 0.2e18});
+        RealizedVolatility.Config({maxAbsTickMove: 1000, alphaWad: 0.2e18, toxicityMode: false});
 
     int24 internal constant START_TICK = 0;
     int24 internal constant RANGE = 3000;
@@ -257,6 +257,33 @@ contract LVRSimulationTest is LVRSimBase {
         }
         uint128 liq = manager.getLiquidity(key.toId());
         assertGt(StatsCollector.lpFeeValue(manager, key.toId(), liq, 1e18), 0);
+    }
+
+    /// @notice #1 — a toxicity (directional-drift) fee signal vs the variance signal vs best-static.
+    ///         Variance rises for any movement (it over-taxes benign retail noise); |drift|² rises only
+    ///         for *directional* (informed/arb) flow, so it should tax the toxic flow without punishing
+    ///         retail. Measures whether the better signal actually helps LP net.
+    function test_toxicitySignal_vs_variance() public {
+        varyingVol = true;
+        staticFeePips = 10_000; // best static from WS1
+
+        int256 bestStatic = _run(false).lpNet;
+        volCfg.toxicityMode = false;
+        int256 varianceDyn = _run(true).lpNet;
+
+        // give the toxicity signal a fair slope sweep (|drift|^2 has a different scale than variance)
+        volCfg.toxicityMode = true;
+        uint256[3] memory slopes = [uint256(5e7), 2e8, 5e8];
+        int256 bestToxicity = type(int256).min;
+        for (uint256 i; i < slopes.length; i++) {
+            feeSlope = slopes[i];
+            int256 net = _run(true).lpNet;
+            if (net > bestToxicity) bestToxicity = net;
+        }
+
+        emit log_named_int("best static   LP net 0.1bps", _dbps(bestStatic));
+        emit log_named_int("variance dyn  LP net 0.1bps", _dbps(varianceDyn));
+        emit log_named_int("best toxicity LP net 0.1bps", _dbps(bestToxicity));
     }
 
     /// @notice #2 — annualization. At synthetic vol our per-window bps are uninterpretable; calibrated

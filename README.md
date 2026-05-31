@@ -124,9 +124,11 @@ volatility there is nothing to adapt to, and on a time-varying path a realized-v
 speeding it up only adds noise. The clearest evidence: after a calm stretch a jump pays a **0.05% fee
 on the exact block it moves the price, and the fee only jumps to 1.0% the block after** — a 19×
 undercharge, no manipulation required. So the honest finding is: **a realized-vol EWMA fee does not
-out-earn a well-tuned static fee on LP net.** Its real value is **composability** (an overlay on any pool, no
-liquidity migration) and this measurement framework; the open problem is a **forward-looking**
-volatility signal, not a backward EWMA.
+out-earn a well-tuned static fee on LP net.** Swapping the realized-vol EWMA for a directional
+*toxicity* signal (following the literature) doesn't help either — it ties the variance signal and
+still loses; every backward-looking on-chain signal hits the same wall. Its real value is
+**composability** (an overlay on any pool, no liquidity migration) and this measurement framework; the
+open problem is a **forward-looking or external** volatility signal, not a backward EWMA.
 
 > **Status:** parameters are uncalibrated and prices are synthetic/single-seed; calibration, realistic
 > price series, and confidence intervals are in progress. The **direction** of the findings is robust;

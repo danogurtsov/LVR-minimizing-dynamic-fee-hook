@@ -54,7 +54,7 @@ contract FeeBoundsInvariant is Test, Deployers {
     FeeCurve.Params internal feeParams =
         FeeCurve.Params({baseFee: 500, minFee: 100, maxFee: 10_000, slope: 5e7});
     RealizedVolatility.Config internal volCfg =
-        RealizedVolatility.Config({maxAbsTickMove: 1000, alphaWad: 0.2e18});
+        RealizedVolatility.Config({maxAbsTickMove: 1000, alphaWad: 0.2e18, toxicityMode: false});
 
     function setUp() public {
         deployFreshManagerAndRouters();

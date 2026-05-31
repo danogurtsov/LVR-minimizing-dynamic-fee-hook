@@ -62,6 +62,15 @@ The premise (a16z: optimal fee rises with volatility) holds; the instrument is w
 value is **composability** and this measurement framework, and the open problem is a **forward-looking**
 volatility signal.
 
+**We also tried a better signal (`test_toxicitySignal_vs_variance`).** Following the literature (better
+fees use order-flow *toxicity* proxies, not just realized vol), we added a directional signal — an EWMA
+of *signed* returns, so the fee reacts to trend (informed flow) rather than any movement (which includes
+benign noise). On LP net it **ties** the variance signal (−18.5 vs −18.4 bps) and still loses to
+best-static (−12.5). Every backward-looking on-chain signal we tried — variance, a faster EWMA, and
+directional drift — hits the same wall: it cannot price a move it has not seen. This is the strongest
+evidence that the fix is not a better *statistic* but a **forward-looking or external** signal (implied
+vol, an oracle), which a fully on-chain hook deliberately forgoes.
+
 **Robust across seeds (Monte Carlo, `test_monteCarlo_varyingVol`).** Over 5 seeds the dynamic fee loses
 to the best static fee every time — gap (dynamic − best-static) mean **−6.1 bps**, range [−8.0, −4.3],
 **0 / 5** seeds where dynamic wins. So the negative result is not a single-path fluke. *Caveat:

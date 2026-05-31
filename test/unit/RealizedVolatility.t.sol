@@ -12,7 +12,7 @@ contract RealizedVolatilityTest is Test {
     RealizedVolatility.Config internal cfg;
 
     function setUp() public {
-        cfg = RealizedVolatility.Config({maxAbsTickMove: 1000, alphaWad: 0.2e18});
+        cfg = RealizedVolatility.Config({maxAbsTickMove: 1000, alphaWad: 0.2e18, toxicityMode: false});
     }
 
     function test_firstUpdate_initializes_noVariance() public {
@@ -72,7 +72,8 @@ contract RealizedVolatilityTest is Test {
     }
 
     function test_alphaOne_equalsLatestSample() public {
-        RealizedVolatility.Config memory c = RealizedVolatility.Config({maxAbsTickMove: 1000, alphaWad: 1e18});
+        RealizedVolatility.Config memory c =
+            RealizedVolatility.Config({maxAbsTickMove: 1000, alphaWad: 1e18, toxicityMode: false});
         obs.update(c, 0);
         vm.roll(block.number + 1);
         obs.update(c, 500);

@@ -109,7 +109,7 @@ contract LVRMinimizingFeeHook is BaseOverrideFee, Ownable2Step, Pausable, ILVRFe
         returns (uint24)
     {
         if (paused()) return _feeParams.minFee;
-        return _feeParams.fee(_obs[key.toId()].current());
+        return _feeParams.fee(_obs[key.toId()].signal(_volConfig));
     }
 
     /// @dev Fold the post-swap tick into the pool's volatility estimate.
@@ -128,7 +128,7 @@ contract LVRMinimizingFeeHook is BaseOverrideFee, Ownable2Step, Pausable, ILVRFe
     /// @inheritdoc ILVRFeeHook
     function currentFee(PoolKey calldata key) external view returns (uint24) {
         if (paused()) return _feeParams.minFee;
-        return _feeParams.fee(_obs[key.toId()].current());
+        return _feeParams.fee(_obs[key.toId()].signal(_volConfig));
     }
 
     /// @inheritdoc ILVRFeeHook

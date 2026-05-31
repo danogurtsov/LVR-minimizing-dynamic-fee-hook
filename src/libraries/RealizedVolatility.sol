@@ -20,14 +20,18 @@ library RealizedVolatility {
         bool initialized;
         int24 lastTick;
         uint32 lastBlock;
-        uint256 varianceWad; // EWMA of per-block return variance (WAD)
+        uint256 varianceWad; // EWMA of per-block return variance (WAD) — direction-agnostic
+        int256 driftWad; // EWMA of per-block *signed* return (WAD) — a directionality / toxicity proxy
     }
 
     /// @param maxAbsTickMove Per-block clamp on the tick delta (manipulation guard).
     /// @param alphaWad EWMA weight on the newest sample, WAD in (0, 1e18].
+    /// @param toxicityMode If true, the fee should be driven by |drift|² (a directional/toxicity
+    ///        signal that ignores mean-reverting noise) instead of variance.
     struct Config {
         int24 maxAbsTickMove;
         uint256 alphaWad;
+        bool toxicityMode;
     }
 
     /// @notice Record `currentTick`, updating the variance estimate once per block.
@@ -53,6 +57,7 @@ library RealizedVolatility {
         if (delta < -maxMove) delta = -maxMove;
 
         o.varianceWad = _ewma(o.varianceWad, _sampleVariance(delta), c.alphaWad);
+        o.driftWad = _ewmaSigned(o.driftWad, delta * LOG_RETURN_PER_TICK_WAD, c.alphaWad);
         o.lastTick = currentTick;
         o.lastBlock = nowBlock;
     }
@@ -60,6 +65,15 @@ library RealizedVolatility {
     /// @notice Current variance estimate (WAD).
     function current(Observation storage o) internal view returns (uint256) {
         return o.varianceWad;
+    }
+
+    /// @notice The fee-driving signal: variance, or |drift|² in toxicity mode. Variance rises for any
+    ///         movement (including mean-reverting noise); |drift|² rises only for *directional* flow,
+    ///         so it is meant to tax informed/toxic flow without over-taxing benign retail noise.
+    function signal(Observation storage o, Config memory c) internal view returns (uint256) {
+        if (!c.toxicityMode) return o.varianceWad;
+        uint256 d = uint256(o.driftWad >= 0 ? o.driftWad : -o.driftWad);
+        return FullMath.mulDiv(d, d, WAD);
     }
 
     /// @dev variance sample (WAD) = (tickDelta * lnPerTick)^2 / WAD.
@@ -73,6 +87,13 @@ library RealizedVolatility {
     function _ewma(uint256 prev, uint256 sample, uint256 alphaWad) private pure returns (uint256) {
         uint256 a = FullMath.mulDiv(alphaWad, sample, WAD);
         uint256 b = FullMath.mulDiv(WAD - alphaWad, prev, WAD);
+        return a + b;
+    }
+
+    /// @dev signed EWMA; inputs are bounded (|sample| ~ maxMove * 1e14) so plain math cannot overflow.
+    function _ewmaSigned(int256 prev, int256 sample, uint256 alphaWad) private pure returns (int256) {
+        int256 a = (int256(alphaWad) * sample) / int256(WAD);
+        int256 b = (int256(WAD - alphaWad) * prev) / int256(WAD);
         return a + b;
     }
 }

@@ -24,7 +24,7 @@ contract Deploy is Script {
         FeeCurve.Params memory feeParams =
             FeeCurve.Params({baseFee: 500, minFee: 100, maxFee: 10_000, slope: 5e7});
         RealizedVolatility.Config memory volConfig =
-            RealizedVolatility.Config({maxAbsTickMove: 1000, alphaWad: 0.2e18});
+            RealizedVolatility.Config({maxAbsTickMove: 1000, alphaWad: 0.2e18, toxicityMode: false});
 
         uint160 flags = uint160(Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG);
         bytes memory args = abi.encode(poolManager, owner, feeParams, volConfig);
