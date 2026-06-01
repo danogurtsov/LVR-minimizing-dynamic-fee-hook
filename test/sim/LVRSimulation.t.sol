@@ -53,6 +53,10 @@ abstract contract LVRSimBase is Test, Deployers {
     int24 internal _extTick; // running external tick for the varying-vol walk
     int24 internal liqRange = 6000; // half-width of the LP's liquidity range (narrow = concentrated)
     int24 internal priceClamp = RANGE; // half-width the external price walk is clamped to
+    bool internal stochVol; // if true, volatility itself is a mean-reverting stochastic process (Heston-ish)
+    uint24 internal _volLevel; // current stochastic volatility (ticks/block)
+    bool internal histReplay; // if true, the walk replays a real per-interval tick series
+    int24[] internal _histDeltas; // real tick moves between consecutive intervals (from a mainnet pool)
     uint256 internal constant RETAIL_PER_BLOCK = 8; // retail-heavy flow, so volume drives LP fees
 
     struct RunResult {
@@ -168,11 +172,30 @@ abstract contract LVRSimBase is Test, Deployers {
         return ((b - 1) / 15) % 2 == 0 ? uint24(30) : uint24(300);
     }
 
-    /// @dev One incremental random step of the external tick using block b's volatility regime.
+    /// @dev Heston-ish stochastic volatility: the vol level mean-reverts toward a base with its own
+    ///      shocks, so volatility *clusters* (calm and turbulent stretches) instead of switching on a
+    ///      fixed schedule.
+    function _stochVolTicks(uint256 b) internal returns (uint24) {
+        int256 base = 40;
+        int256 cur = _volLevel == 0 ? base : int256(uint256(_volLevel));
+        int256 shock = int256(uint256(keccak256(abi.encode("vol", seed, b))) % 41) - 20;
+        int256 next = cur + (base - cur) / 4 + shock; // revert 25% toward base, then shock
+        if (next < 3) next = 3;
+        if (next > 400) next = 400;
+        _volLevel = uint24(uint256(next));
+        return _volLevel;
+    }
+
+    /// @dev One incremental step of the external tick: a real move (historical replay) or a random one.
     function _walkStep(uint256 b) internal returns (int24) {
-        uint24 st = _stepAt(b);
-        uint256 h = uint256(keccak256(abi.encode(seed, b)));
-        int256 delta = int256(h % (2 * uint256(st) + 1)) - int256(uint256(st));
+        int256 delta;
+        if (histReplay) {
+            delta = int256(_histDeltas[(b - 1) % _histDeltas.length]);
+        } else {
+            uint24 st = stochVol ? _stochVolTicks(b) : _stepAt(b);
+            uint256 h = uint256(keccak256(abi.encode(seed, b)));
+            delta = int256(h % (2 * uint256(st) + 1)) - int256(uint256(st));
+        }
         _extTick = int24(int256(_extTick) + delta);
         return _extTick;
     }
@@ -212,6 +235,7 @@ abstract contract LVRSimBase is Test, Deployers {
         int256 retailGain; // retail inventory gain at external price (negative: fees + impact to LPs)
         _extTick = START_TICK;
         _residualSum = 0;
+        _volLevel = 40;
         for (uint256 b = 1; b <= NBLOCKS; b++) {
             vm.roll(block.number + 1);
             int24 ext = _clamp(varyingVol ? _walkStep(b) : PricePath.tickAt(seed, b, START_TICK, stepTicks));
@@ -259,6 +283,21 @@ contract LVRSimulationTest is LVRSimBase {
         }
         uint128 liq = manager.getLiquidity(key.toId());
         assertGt(StatsCollector.lpFeeValue(manager, key.toId(), liq, 1e18), 0);
+    }
+
+    /// @notice #4 — does the conclusion survive a realistic (stochastic, clustering) volatility process,
+    ///         not just a scripted regime switch? Heston-ish vol, best static vs dynamic on LP net.
+    function test_stochasticVol() public {
+        varyingVol = true;
+        stochVol = true;
+        staticFeePips = 10_000;
+        int256 bestStatic = _run(false).lpNet;
+        volCfg.toxicityMode = false;
+        int256 dyn = _run(true).lpNet;
+        emit log_named_int("best static LP net 0.1bps", _dbps(bestStatic));
+        emit log_named_int("dynamic     LP net 0.1bps", _dbps(dyn));
+        // conclusion should survive: dynamic still loses to the best static fee
+        assertLt(dyn, bestStatic);
     }
 
     /// @notice #3 — concentrated liquidity amplifies LVR. Same liquidity `L` and the same price path,

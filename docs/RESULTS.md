@@ -78,6 +78,14 @@ The premise (a16z: optimal fee rises with volatility) holds; the instrument is w
 value is **composability** and this measurement framework, and the open problem is a **forward-looking**
 volatility signal.
 
+**Robust to the price model, and conditional on volatility.** The result holds on a Heston-ish
+stochastic-vol path (`test_stochasticVol`), not just the scripted regime switch. And a **genuine
+historical replay** of ETH/USDC's real per-12s moves from mainnet (`test_historicalReplay`, v3 `observe`)
+refines it: on that **calm real window** LP net is ~0 for both and dynamic is *not* worse — it keeps the
+fee low correctly. So the honest, precise statement is **conditional**: the dynamic fee loses to
+best-static specifically under **volatility changes** (where the EWMA lag mistimes it), and is
+neutral-to-fine in calm/stable conditions — never a clear win on LP net.
+
 **We also tried a better signal (`test_toxicitySignal_vs_variance`).** Following the literature (better
 fees use order-flow *toxicity* proxies, not just realized vol), we added a directional signal — an EWMA
 of *signed* returns, so the fee reacts to trend (informed flow) rather than any movement (which includes
