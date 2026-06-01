@@ -17,6 +17,22 @@ volatility (≈ ETH 5%/day) the annualized LVR is **~19 %/yr**, the same order a
 — a check that the harness is grounded. All the comparisons in this doc are **matched** (same path both
 sides), so their *direction and ranking* are robust even though their absolute size is not calibrated.
 
+## Concentrated liquidity amplifies LVR (`test_concentratedLiquidity`)
+
+The numbers below use a **wide** liquidity range, which makes them a **floor**. Same liquidity and price
+path, only the range width changes:
+
+| range (ticks) | LP capital | LVR (bps of capital) |
+|---:|---:|---:|
+| ±6000 (wide) | 518 | 0.2 |
+| ±1200 | 116 | 1.0 |
+| ±300 (concentrated) | 30 | 4.0 |
+
+Concentrating 20× raises LVR-as-%-of-capital ~20× (same depth, far less capital) — the textbook
+"concentrated (v3) LPs face more LVR than v2" result. A realistic concentrated LP faces materially more
+than the wide-range figures here; the *ranking* (dynamic loses to best-static) is unchanged, the
+absolute stakes are higher.
+
 ## LP net welfare — the metric that matters (`test_lpNetWelfare`)
 
 Fee revenue is a proxy; the quantity that decides whether an LP should provide liquidity is **LP net

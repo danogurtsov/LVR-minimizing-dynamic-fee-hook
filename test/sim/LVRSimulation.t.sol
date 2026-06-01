@@ -51,6 +51,8 @@ abstract contract LVRSimBase is Test, Deployers {
     uint24 internal staticFeePips = 500; // fee of the static-pool baseline; overridable
     bool internal varyingVol; // if true, volatility switches between calm and burst regimes over time
     int24 internal _extTick; // running external tick for the varying-vol walk
+    int24 internal liqRange = 6000; // half-width of the LP's liquidity range (narrow = concentrated)
+    int24 internal priceClamp = RANGE; // half-width the external price walk is clamped to
     uint256 internal constant RETAIL_PER_BLOCK = 8; // retail-heavy flow, so volume drives LP fees
 
     struct RunResult {
@@ -148,16 +150,16 @@ abstract contract LVRSimBase is Test, Deployers {
     function _addWideLiquidity(PoolKey memory k) internal {
         BalanceDelta d = modifyLiquidityRouter.modifyLiquidity(
             k,
-            ModifyLiquidityParams({tickLower: -6000, tickUpper: 6000, liquidityDelta: 1e21, salt: 0}),
+            ModifyLiquidityParams({tickLower: -liqRange, tickUpper: liqRange, liquidityDelta: 1e21, salt: 0}),
             ZERO_BYTES
         );
         // delta is negative (tokens paid in); |amount0| + |amount1| at P=1 = deposited capital
         lpCapital = uint256(uint128(-d.amount0())) + uint256(uint128(-d.amount1()));
     }
 
-    function _clamp(int24 t) internal pure returns (int24) {
-        if (t > RANGE) return RANGE;
-        if (t < -RANGE) return -RANGE;
+    function _clamp(int24 t) internal view returns (int24) {
+        if (t > priceClamp) return priceClamp;
+        if (t < -priceClamp) return -priceClamp;
         return t;
     }
 
@@ -257,6 +259,30 @@ contract LVRSimulationTest is LVRSimBase {
         }
         uint128 liq = manager.getLiquidity(key.toId());
         assertGt(StatsCollector.lpFeeValue(manager, key.toId(), liq, 1e18), 0);
+    }
+
+    /// @notice #3 — concentrated liquidity amplifies LVR. Same liquidity `L` and the same price path,
+    ///         but a narrower range holds less capital for the same depth — so the LVR the arb extracts,
+    ///         as a share of capital, rises sharply as the LP concentrates. This is the effect the
+    ///         literature centers on (v3 worse than v2 for passive LPs); our wide-range headline numbers
+    ///         are a floor.
+    function test_concentratedLiquidity() public {
+        stepTicks = 20; // realistic-ish vol, stays inside even the narrow range
+        int24[3] memory ranges = [int24(6000), 1200, 300];
+        int24[3] memory clamps = [int24(3000), 900, 240];
+        int256 prevLvr;
+        for (uint256 i; i < ranges.length; i++) {
+            liqRange = ranges[i];
+            priceClamp = clamps[i];
+            RunResult memory s = _run(false);
+            int256 lvr = _dbps(s.arbProfitTrue); // 0.1 bps of capital
+            emit log_named_int("liq range (ticks)   ", int256(ranges[i]));
+            emit log_named_uint("  LP capital        ", lpCapital);
+            emit log_named_int("  LVR 0.1bps of cap ", lvr);
+            emit log_named_int("  LP net 0.1bps     ", _dbps(s.lpNet));
+            if (i > 0) assertGt(lvr, prevLvr); // LVR/capital rises as the range narrows
+            prevLvr = lvr;
+        }
     }
 
     /// @notice #1 — a toxicity (directional-drift) fee signal vs the variance signal vs best-static.
