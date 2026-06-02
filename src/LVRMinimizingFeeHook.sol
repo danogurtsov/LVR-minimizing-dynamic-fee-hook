@@ -20,10 +20,11 @@ import {RealizedVolatility} from "./libraries/RealizedVolatility.sol";
 import {ILVRFeeHook} from "./interfaces/ILVRFeeHook.sol";
 
 /// @title LVRMinimizingFeeHook
-/// @notice A Uniswap v4 hook that sets the LP fee from the pool's own realized volatility, so the
-///         no-arbitrage band widens when loss-versus-rebalancing is highest and relaxes when the
-///         market is calm. Built on OpenZeppelin's `BaseOverrideFee` (per-swap fee override) plus a
-///         per-pool volatility observation updated after each swap.
+/// @notice A Uniswap v4 hook that sets the LP fee from the pool's own recent realized volatility, to
+///         widen the no-arbitrage band in volatile markets and relax it in calm ones. Built on
+///         OpenZeppelin's `BaseOverrideFee` (per-swap fee override) plus a per-pool volatility
+///         observation updated after each swap. NB: the estimate is backward-looking; see the repo's
+///         results for the measured limits of this design (it lags the move it is meant to price).
 /// @dev The owner can retune the curve and volatility config, and can pause to fall back to a fixed
 ///      fee (the floor of the curve) without ever reverting a swap.
 contract LVRMinimizingFeeHook is BaseOverrideFee, Ownable2Step, Pausable, ILVRFeeHook {

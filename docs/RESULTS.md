@@ -137,41 +137,40 @@ the sweep). The optimum fee balances the two; the maximum fee is *not* optimal. 
 just plotted: the test requires the arb series to be monotone and the retail series to peak in the
 interior.
 
-## Offline — volatility sweep (`test_scenarioSweep`)
+## Offline — fee-revenue mechanics across volatility (`test_scenarioSweep`)
 
-The external path's per-block volatility (in ticks) is swept; everything else is fixed. Each row is a
-matched static-vs-dynamic run over the same seeded path.
+> **These two tables are fee *revenue* (a proxy), not LP net.** They show how the fee *responds* to
+> volatility, not that it helps — on LP net it loses to the best static fee (see above). Read them for
+> mechanism only.
 
-| Volatility (ticks/block) | LP fees static | LP fees dynamic | LP lift | Retail fee static | Retail fee dynamic |
-|---:|---:|---:|---:|---:|---:|
-| 20 (stable)  | 0.01488 | 0.01672 | 1.12× | 0.050% | 0.057% |
-| 60 (low)     | 0.04086 | 0.08090 | 1.98× | 0.050% | 0.100% |
-| 120 (mid)    | 0.08613 | 0.41160 | 4.78× | 0.050% | 0.249% |
-| 200 (high)   | 0.15257 | 1.99857 | 13.10× | 0.050% | 0.673% |
-| 300 (extreme)| 0.21517 | 4.05883 | 18.86× | 0.050% | 0.970% |
+The external path's per-block volatility (in ticks) is swept; everything else is fixed. Matched
+static-vs-*naive-0.05%*-static over the same seeded path.
 
-The dynamic fee widens the band exactly in the volatile blocks, so LPs earn far more fee revenue (and
-the arbitrageur retains less) — at the cost of a higher average fee to retail. Both sides scale
-monotonically with volatility: the recapture grows, and so does the retail cost. The cost is shown,
-not hidden.
+| Volatility (ticks/block) | LP fees static | LP fees dynamic | fee-rev ratio | Retail fee dynamic |
+|---:|---:|---:|---:|---:|
+| 20 (stable)  | 0.01488 | 0.01672 | 1.12× | 0.057% |
+| 60 (low)     | 0.04086 | 0.08090 | 1.98× | 0.100% |
+| 120 (mid)    | 0.08613 | 0.41160 | 4.78× | 0.249% |
+| 200 (high)   | 0.15257 | 1.99857 | 13.10× | 0.673% |
+| 300 (extreme)| 0.21517 | 4.05883 | 18.86× | 0.970% |
 
-## Fork — seeded by live mainnet pools
+The dynamic fee raises the fee in volatile blocks (with a lag), so fee revenue climbs and the retail
+cost climbs with it. This is only the *revenue* half; netted against LVR and against a well-tuned static
+fee, the dynamic fee does not come out ahead (LP-net section above).
 
-Each pool's live tick is read from mainnet (proving real access); the run then uses that pool's
-volatility regime. Requires `ETH_RPC_URL`; skips cleanly without it.
+## Fork — real mainnet pools
 
-| Pool | Live tick | Regime (step) | LP fees static | LP fees dynamic | Change | Avg retail fee (dyn) |
-|---|---:|---:|---:|---:|---:|---:|
-| WBTC/ETH 0.30% | 265,598 | volatile (200) | 0.1526 | 1.9986 | **+13.1×** | 0.673% |
-| ETH/USDC 0.05% | 200,965 | mid (120) | 0.0861 | 0.4116 | +4.8× | 0.249% |
-| USDC/USDT 0.01% | 7 | stable (20) | 0.01488 | 0.01672 | **+1.1×** | 0.057% |
+Two fork tests (require `ETH_RPC_URL`; skip cleanly without it): `test_forkRealPools` reads three pools'
+live ticks and runs each pool's volatility regime (fee-revenue proxy again); `test_historicalReplay`
+replays ETH/USDC's real per-12s moves as the path and measures LP net — on that calm real window both
+fees are ~0 and dynamic is not worse. Live ticks read: WBTC/ETH 265,598 · ETH/USDC 200,965 · USDC/USDT 7.
 
 ## Reading
 
-- **Where it helps most:** volatile, arbitrage-heavy pools (WBTC/ETH). The fee tracks the σ² shape of
-  LVR, so the more volatile the pool, the more value the fee keeps in it.
-- **Where it is near-neutral:** stable pools (USDC/USDT). Low realized volatility keeps the fee at the
-  floor, so retail pays essentially the base fee (0.057% ≈ 0.05%) and LP revenue barely moves — the
-  hook does no harm where there is little LVR to recapture.
-- **The tradeoff is real:** in volatile regimes the average fee retail pays rises. Whether the extra
-  LP revenue is worth it is a per-pool decision; the harness is here to make that decision measurable.
+- **The verdict is LP net, and it is negative-or-neutral.** A realized-vol EWMA fee does not beat a
+  well-tuned static fee: it loses under volatility *changes* (the fee is one block late) and is neutral
+  in calm/stable conditions. Fee-revenue tables above show the mechanism, not a win.
+- **Where the fee is at least harmless:** stable/calm pools — low volatility pins it near the floor, so
+  retail pays ~the base fee and little is lost either way.
+- **The cost is real:** in volatile regimes the fee both lags and raises the average price retail pays;
+  the harness measures that tradeoff so it can be judged per pool, not assumed.

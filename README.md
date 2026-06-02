@@ -53,17 +53,18 @@ retail flow that is the LP's only reliable source of profit. A single number is 
 ## What this hook does
 
 `LVRMinimizingFeeHook` estimates volatility on-chain from the pool's price observations and, in
-`beforeSwap`, sets a fee that widens the no-arbitrage band precisely when LVR is highest:
+`beforeSwap`, sets a fee that rises when *recent* realized volatility is high:
 
 ```
 fee(σ̂) = clamp(baseFee + slope · σ̂², minFee, maxFee)
 ```
 
-The fee is **linear in variance**, mirroring the σ² shape of LVR itself, so it tracks the cost it is
-meant to offset. More of the arbitrage value stays in the pool as fees; retail keeps paying near the
-floor in calm markets. It is a **composable overlay** — it attaches to an ordinary v4 pool, changing a
-fee, not the curve — deliberately unlike mechanism-level redesigns (FM-AMM, CoW AMM, Diamond) that
-recapture more LVR but require migrating liquidity into a new venue.
+The fee is **linear in variance**, mirroring the σ² shape of LVR — the *intent* being to widen the
+no-arbitrage band when LVR is high. (In practice the estimate is **backward-looking**, so the fee
+arrives after the move, not before it — this is the crux of the finding below.) It is a **composable
+overlay** — it attaches to an ordinary v4 pool, changing a fee, not the curve — deliberately unlike
+mechanism-level redesigns (FM-AMM, CoW AMM, Diamond) that recapture more LVR but require migrating
+liquidity into a new venue.
 
 ### What it is not
 
