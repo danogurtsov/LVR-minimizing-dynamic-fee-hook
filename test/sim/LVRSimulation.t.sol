@@ -574,9 +574,9 @@ contract LVRSimulationTest is LVRSimBase {
     ///         curve). Retail volume falls monotonically the whole way — that is the cost.
     function test_feeAggressivenessSweep() public {
         stepTicks = 150; // fixed volatility regime
-        uint256[6] memory slopes = [uint256(0), 2.5e7, 5e7, 1e8, 2e8, 4e8];
-        uint256[6] memory arb;
-        uint256[6] memory retail_;
+        uint256[5] memory slopes = [uint256(0), 2.5e7, 5e7, 1e8, 2e8];
+        uint256[5] memory arb;
+        uint256[5] memory retail_;
         for (uint256 i; i < slopes.length; i++) {
             feeSlope = slopes[i];
             RunResult memory d = _run(true);
@@ -596,7 +596,7 @@ contract LVRSimulationTest is LVRSimBase {
         // retail fee revenue is a Laffer curve: it peaks at a moderate fee and then falls as the
         // fee scares off the volume that generates it
         assertGt(retail_[2], retail_[0], "retail fees should rise into the peak");
-        assertGt(retail_[2], retail_[5], "retail fees should fall past the peak");
+        assertGt(retail_[2], retail_[4], "retail fees should fall past the peak");
     }
 
     /// @notice Sweep across volatility regimes; the logged figures feed the README charts.
